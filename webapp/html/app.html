@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Finance Module</title>
+    <link rel="stylesheet" href="css/app.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+</head>
+<body>
+    <div class="sidebar">
+        <div class="sidebar-top">
+            <nav>
+                <a href="#" class="active" data-tab="home" title="Home"><i class="fas fa-home"></i></a>
+                <a href="#" data-tab="overview" title="Overview"><i class="fas fa-chart-pie"></i></a>
+                <a href="#" data-tab="data" title="Data"><i class="fas fa-table"></i></a>
+                <a href="#" data-tab="invoice" title="Invoice"><i class="fas fa-pound-sign"></i></a>
+            </nav>
+        </div>
+        <div class="sidebar-bottom">
+            <a href="#" id="settingsBtn" title="Settings"><i class="fas fa-gear"></i></a>
+            <a href="#" id="logoutBtn" title="Logout"><i class="fas fa-right-from-bracket"></i></a>
+        </div>
+    </div>
+
+    <div class="main">
+        <header>
+            <h1 id="pageTitle">Home</h1>
+        </header>
+
+        <div class="content">
+            <div id="home" class="tab-content active">
+                <h2>Welcome to the Finance Module</h2>
+                <p>Our Finance Module is a comprehensive platform designed to simplify and enhance your financial management processes. Whether you are handling invoicing, analyzing financial data, or generating reports, this application offers a user-friendly interface combined with powerful features to support your workflow.</p>
+                <p>To maximize your experience and efficiency, we recommend exploring the curated training materials below. These resources provide step-by-step guidance, best practices, and tips to help you leverage the full capabilities of the Finance Module.</p>
+                <ul>
+                    <li><a href="https://gm61.co.uk" target="_blank" rel="noopener noreferrer">Training Link 1</a></li>
+                    <li><a href="https://gm61.co.uk" target="_blank" rel="noopener noreferrer">Training Link 2</a></li>
+                    <li><a href="https://gm61.co.uk" target="_blank" rel="noopener noreferrer">Training Link 3</a></li>
+                </ul>
+                <p>For detailed information about GM61’s range of services and to stay updated with the latest developments, please visit our <a href="https://gm61.co.uk" target="_blank" rel="noopener noreferrer">official website</a>. Here you will find insights into our expertise and how we can assist your business growth.</p>
+                <p>Should you require assistance or have any questions, our dedicated support team is ready to help. Feel free to reach out via the following contact points:</p>
+                <ul>
+                    <li><a href="mailto:support@gm61.co.uk">support@gm61.co.uk</a> – For general support inquiries</li>
+                    <li><a href="mailto:helpdesk@gm61.co.uk">helpdesk@gm61.co.uk</a> – For technical assistance and troubleshooting</li>
+                </ul>
+            </div>
+
+            <div id="overview" class="tab-content">
+                <h2>Overview</h2>
+                <div class="widgets">
+                    <div class="widget">Total Money Billed Placeholder</div>
+                    <div class="widget">Customer Breakdown Chart Placeholder</div>
+                    <div class="widget">KPI Placeholder</div>
+                    <div class="widget">Additional Chart Placeholder</div>
+                </div>
+            </div>
+
+            <div id="data" class="tab-content">
+                <h2>Data</h2>
+                <p>SQL Table Placeholder</p>
+                <button>Edit</button>
+                <button>Submit for Invoicing</button>
+            </div>
+
+            <div id="invoice" class="tab-content">
+                <h2>Invoices</h2>
+                <p>Invoices Placeholder</p>
+            </div>
+
+            <div id="settings" class="tab-content">
+                <h2>Settings</h2>
+
+                <section id="company-info">
+                    <h3>Company Info</h3>
+                    <p>Company information management placeholder.</p>
+                </section>
+
+                <section id="access-rights">
+                    <h3>Access Rights</h3>
+                    <p>Manage user access rights placeholder.</p>
+                </section>
+
+                <section id="username-password">
+                    <h3>Username / Password Change</h3>
+                    <p>Change your username and password placeholder.</p>
+                </section>
+
+                <section id="user-details">
+                    <h3>User Name and Contact Details</h3>
+                    <p>Update your user name and contact details placeholder.</p>
+                </section>
+
+                <section id="invite-users">
+                    <h3>Invite Other Users</h3>
+                    <p>Invite other users to the platform placeholder.</p>
+                </section>
+
+                <section id="dark-mode-toggle">
+                    <h3>Dark Mode Toggle</h3>
+                    <p>Toggle dark mode placeholder.</p>
+                </section>
+
+                <section id="integrations-management">
+                    <h3>Integrations Management</h3>
+                    <p>Manage integrations placeholder.</p>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Access control
+        //if (localStorage.getItem('loggedIn') !== 'true') {
+            //window.location.href = 'index.html';
+        //}
+
+        // Sidebar tab switching
+        const tabs = document.querySelectorAll('.sidebar nav a');
+        const tabContents = document.querySelectorAll('.tab-content');
+        const pageTitle = document.getElementById('pageTitle');
+
+        const tabNames = {
+            home: 'Home',
+            overview: 'Overview',
+            data: 'Data',
+            invoice: 'Invoices',
+            settings: 'Settings'
+        };
+
+        tabs.forEach(tab => {
+            tab.addEventListener('click', (e) => {
+                e.preventDefault();
+                const target = tab.dataset.tab;
+
+                // Remove active from all links
+                tabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+
+                // Show the corresponding content
+                tabContents.forEach(tc => {
+                    if(tc.id === target) {
+                        tc.classList.add('active');
+                    } else {
+                        tc.classList.remove('active');
+                    }
+                });
+
+                // Update page title
+                if(tabNames[target]) {
+                    pageTitle.textContent = tabNames[target];
+                }
+            });
+        });
+
+        // Settings button click to show settings tab
+        const settingsBtn = document.getElementById('settingsBtn');
+        settingsBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+
+            // Remove active from all sidebar nav links
+            tabs.forEach(t => t.classList.remove('active'));
+
+            // Hide all tab contents
+            tabContents.forEach(tc => tc.classList.remove('active'));
+
+            // Show settings tab content
+            const settingsContent = document.getElementById('settings');
+            if(settingsContent) {
+                settingsContent.classList.add('active');
+            }
+
+            // Update page title
+            pageTitle.textContent = tabNames['settings'];
+        });
+
+        // Logout functionality
+        const logoutBtn = document.getElementById('logoutBtn');
+        logoutBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            localStorage.removeItem('loggedIn');
+            window.location.href = 'index.html';
+        });
+    </script>
+</body>
+</html>
