@@ -12,3 +12,22 @@ services:
     container_name: financeModuleBackend
     ports:
       - "5000:5000"   # example
+    depends_on:
+      - database
+
+  database:
+    build:
+      context: ./database
+    container_name: financeModuleDatabase
+    image: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: finance_db
+      POSTGRES_USER: finance_user
+      POSTGRES_PASSWORD: securepassword
+    volumes:
+      - finance_data:/var/lib/postgresql/data
+
+volumes:
+  finance_data: {}
