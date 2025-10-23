@@ -1,7 +1,7 @@
-# FinanceModule
+# BridgePoint - Automated Invoicing system
 
 ## Non-Technical Overview
-FinanceModule is a web-based application designed to streamline financial processes for small to medium-sized businesses. It allows users to log in securely, view key metrics, access and manage raw financial data, track invoices, and interact with integrations such as SQL databases and financial APIs.
+BridgePoint is a web-based application designed to streamline financial processes for small to medium-sized businesses. It allows users to log in securely, view key metrics, access and manage raw financial data, track invoices, and interact with integrations such as SQL databases and financial APIs.
 
 The application emphasizes a modern, iOS-style user interface, with a floating login island and a clean, intuitive layout. Users can navigate through sections such as Home, Overview, Data, Invoices, and Settings with ease.
 
