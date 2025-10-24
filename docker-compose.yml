@@ -2,23 +2,23 @@ services:
   frontend:
     build:
       context: ./webapp
-    container_name: financeModuleWebServer
+    container_name: BridgePointWebServer
     ports:
       - "80:80"
 
   backend:
     build:
       context: ./backend
-    container_name: financeModuleBackend
+    container_name: BridgePointBackend
     ports:
-      - "5000:5000"   # example
+      - "8000:8000"
     depends_on:
       - database
 
   database:
     build:
       context: ./database
-    container_name: financeModuleDatabase
+    container_name: BridgePointDatabase
     image: postgres
     ports:
       - "5432:5432"

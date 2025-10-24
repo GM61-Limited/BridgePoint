@@ -1,9 +1,9 @@
 FROM postgres:latest
 
 # Environment variables for PostgreSQL setup
-ENV POSTGRES_DB=mydatabase
-ENV POSTGRES_USER=myuser
-ENV POSTGRES_PASSWORD=mypassword
+ENV POSTGRES_DB=bridgepointbd
+ENV POSTGRES_USER=gm61admin
+ENV POSTGRES_PASSWORD=camioninsta
 
 # Note:
 # To persist data, mount a volume to /var/lib/postgresql/data

@@ -110,10 +110,10 @@
     </div>
 
     <script>
-        // Access control
-        //if (localStorage.getItem('loggedIn') !== 'true') {
-            //window.location.href = 'index.html';
-        //}
+        // Enforce token-based access control
+        if (!localStorage.getItem('authToken')) {
+            window.location.href = 'index.html';
+        }
 
         // Sidebar tab switching
         const tabs = document.querySelectorAll('.sidebar nav a');
@@ -178,7 +178,7 @@
         const logoutBtn = document.getElementById('logoutBtn');
         logoutBtn.addEventListener('click', (e) => {
             e.preventDefault();
-            localStorage.removeItem('loggedIn');
+            localStorage.removeItem('authToken');
             window.location.href = 'index.html';
         });
     </script>
