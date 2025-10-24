@@ -30,8 +30,8 @@
 
         <div class="content">
             <div id="home" class="tab-content active">
-                <h2>Welcome to the Finance Module</h2>
-                <p>Our Finance Module is a comprehensive platform designed to simplify and enhance your financial management processes. Whether you are handling invoicing, analyzing financial data, or generating reports, this application offers a user-friendly interface combined with powerful features to support your workflow.</p>
+                <h2>Welcome to BridgePoint by GM61 Limited</h2>
+                <p>BridgePoint is a comprehensive platform designed to simplify and enhance your financial management processes. Whether you are handling invoicing, analyzing financial data, or generating reports, this application offers a user-friendly interface combined with powerful features to support your workflow.</p>
                 <p>To maximize your experience and efficiency, we recommend exploring the curated training materials below. These resources provide step-by-step guidance, best practices, and tips to help you leverage the full capabilities of the Finance Module.</p>
                 <ul>
                     <li><a href="https://gm61.co.uk" target="_blank" rel="noopener noreferrer">Training Link 1</a></li>
@@ -71,39 +71,82 @@
             <div id="settings" class="tab-content">
                 <h2>Settings</h2>
 
-                <section id="company-info">
-                    <h3>Company Info</h3>
-                    <p>Company information management placeholder.</p>
+                <section id="accessibility">
+                    <h3>Accessibility</h3>
+                    <label class="switch">
+                        <input type="checkbox" id="darkModeToggle" />
+                        <span class="slider"></span>
+                    </label>
+                    <span style="margin-left:10px;">Dark Mode</span>
                 </section>
 
-                <section id="access-rights">
-                    <h3>Access Rights</h3>
-                    <p>Manage user access rights placeholder.</p>
+                <section id="integrations" style="margin-top:2em;">
+                    <h3>Integrations</h3>
+                    <div class="integration-block">
+                        <strong>API Connection</strong><br>
+                        <input type="text" placeholder="API Endpoint URL" style="width:60%;" />
+                        <button>Connect</button>
+                    </div>
+                    <div class="integration-block" style="margin-top:1em;">
+                        <strong>SQL Connection</strong><br>
+                        <input type="text" placeholder="SQL Host" style="width:20%;" />
+                        <input type="text" placeholder="Database" style="width:20%;" />
+                        <input type="text" placeholder="Username" style="width:15%;" />
+                        <input type="password" placeholder="Password" style="width:15%;" />
+                        <button>Connect</button>
+                    </div>
                 </section>
 
-                <section id="username-password">
-                    <h3>Username / Password Change</h3>
-                    <p>Change your username and password placeholder.</p>
+                <section id="users" style="margin-top:2em;">
+                    <h3>Users</h3>
+                    <table style="width:100%; border-collapse:collapse; margin-bottom:1em;">
+                        <thead>
+                            <tr style="background:#f0f0f0;">
+                                <th style="padding:6px; border:1px solid #ccc;">Name</th>
+                                <th style="padding:6px; border:1px solid #ccc;">Email</th>
+                                <th style="padding:6px; border:1px solid #ccc;">Access Level</th>
+                                <th style="padding:6px; border:1px solid #ccc;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td style="padding:6px; border:1px solid #ccc;">Jane Doe</td>
+                                <td style="padding:6px; border:1px solid #ccc;">jane@example.com</td>
+                                <td style="padding:6px; border:1px solid #ccc;">Admin</td>
+                                <td style="padding:6px; border:1px solid #ccc;">
+                                    <button title="Remove User"><i class="fas fa-user-minus"></i></button>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style="padding:6px; border:1px solid #ccc;">John Smith</td>
+                                <td style="padding:6px; border:1px solid #ccc;">john@example.com</td>
+                                <td style="padding:6px; border:1px solid #ccc;">Viewer</td>
+                                <td style="padding:6px; border:1px solid #ccc;">
+                                    <button title="Remove User"><i class="fas fa-user-minus"></i></button>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <button><i class="fas fa-user-plus"></i> Add User</button>
                 </section>
 
-                <section id="user-details">
-                    <h3>User Name and Contact Details</h3>
-                    <p>Update your user name and contact details placeholder.</p>
-                </section>
-
-                <section id="invite-users">
-                    <h3>Invite Other Users</h3>
-                    <p>Invite other users to the platform placeholder.</p>
-                </section>
-
-                <section id="dark-mode-toggle">
-                    <h3>Dark Mode Toggle</h3>
-                    <p>Toggle dark mode placeholder.</p>
-                </section>
-
-                <section id="integrations-management">
-                    <h3>Integrations Management</h3>
-                    <p>Manage integrations placeholder.</p>
+                <section id="account" style="margin-top:2em;">
+                    <h3>Account</h3>
+                    <form style="max-width:400px;">
+                        <div style="margin-bottom:1em;">
+                            <label for="acc-name" style="display:block; margin-bottom:0.3em;">Name</label>
+                            <input type="text" id="acc-name" placeholder="Your Name" style="width:100%;" />
+                        </div>
+                        <div style="margin-bottom:1em;">
+                            <label for="acc-email" style="display:block; margin-bottom:0.3em;">Email</label>
+                            <input type="email" id="acc-email" placeholder="your@email.com" style="width:100%;" />
+                        </div>
+                        <div style="margin-bottom:1em;">
+                            <label for="acc-password" style="display:block; margin-bottom:0.3em;">New Password</label>
+                            <input type="password" id="acc-password" placeholder="New Password" style="width:100%;" />
+                        </div>
+                        <button type="button">Save Changes</button>
+                    </form>
                 </section>
             </div>
         </div>
