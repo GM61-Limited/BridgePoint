@@ -44,6 +44,21 @@ CREATE TABLE IF NOT EXISTS system_logs (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
+-- API Connections table
+CREATE TABLE IF NOT EXISTS api_connections (
+    id SERIAL PRIMARY KEY,
+    company_id INT REFERENCES environment(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,                   -- e.g. 'Xero', 'Power BI', 'Timely'
+    base_url VARCHAR(255),                        -- optional: base API URL
+    api_key VARCHAR(255),                         -- API key or client ID
+    api_secret VARCHAR(255),                      -- secret / client secret
+    token VARCHAR(500),                           -- access token if needed
+    refresh_token VARCHAR(500),                   -- refresh token if needed
+    expires_at TIMESTAMP,                         -- expiry time for tokens
+    status VARCHAR(50) DEFAULT 'Active',          -- Active / Inactive / Expired
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
 
 -- Seed initial environments
 INSERT INTO environment (name, domain) VALUES 
@@ -53,6 +68,6 @@ INSERT INTO environment (name, domain) VALUES
 
 -- Seed initial users with placeholder password hashes
 INSERT INTO users (username, password_hash, first_name, last_name, company_id, email, role) VALUES
-('testuser', 'PLACEHOLDER_HASH', 'Test', 'User', 1, 'testuser@testcompany.com', 'Admin'),
-('GM61', 'PLACEHOLDER_HASH', 'GM61', 'User', 2, 'gm61@gm61.co.uk', 'Admin'),
-('IHSS', 'PLACEHOLDER_HASH', 'IHSS', 'User', 3, 'ihss@ihss.co.uk', 'Admin');
+('testuser', '$2b$12$h82fM8b1unYEkJg4KQQghui4.Rqpto5OVhX./tr3ZRQ4gZI6KYc8G', 'Test', 'User', 1, 'testuser@testcompany.com', 'Admin'),
+('GM61', '$2b$12$h82fM8b1unYEkJg4KQQghui4.Rqpto5OVhX./tr3ZRQ4gZI6KYc8G', 'GM61', 'User', 2, 'gm61@gm61.co.uk', 'Admin'),
+('IHSS', '$2b$12$h82fM8b1unYEkJg4KQQghui4.Rqpto5OVhX./tr3ZRQ4gZI6KYc8G', 'IHSS', 'User', 3, 'ihss@ihss.co.uk', 'Admin');

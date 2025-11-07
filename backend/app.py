@@ -5,6 +5,9 @@ from datetime import datetime, timedelta
 from typing import Optional
 from fastapi.security import OAuth2PasswordBearer
 import jwt
+import psycopg2
+import psycopg2.extras
+import bcrypt
 
 app = FastAPI(title="FinanceModule Backend API")
 
@@ -16,23 +19,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# --- Sample hardcoded data ---
-users = {
-    "admin": {"password": "admin", "role": "Administrator", "company": "GM61 Limited"},
-    "user": {"password": "password", "role": "User", "company": "IHSS Limited"}
-}
-
-mock_data = [
-    {"customer": "Acme Ltd", "amount": 1200, "status": "Billed"},
-    {"customer": "BetaCorp", "amount": 950, "status": "Pending"},
-    {"customer": "Delta Industries", "amount": 720, "status": "Paid"},
-]
-
-# --- Test route ---
-@app.get("/hello")
-def hello_world():
-    return {"message": "Hello World From GM61 BridgePoint!"}
 
 # --- JWT Config ---
 SECRET_KEY = "your_secret_key"
@@ -50,6 +36,25 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str
 
+import os
+
+# --- Database config ---
+DB_HOST = os.environ.get("DB_HOST", "database")
+DB_PORT = int(os.environ.get("DB_PORT", 5432))
+DB_NAME = os.environ.get("DB_NAME", "bridgepointbd")
+DB_USER = os.environ.get("DB_USER", "gm61admin")
+DB_PASSWORD = os.environ.get("DB_PASSWORD", "camioninsta")
+
+def get_db_connection():
+    conn = psycopg2.connect(
+        host=DB_HOST,
+        port=DB_PORT,
+        dbname=DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD
+    )
+    return conn
+
 # --- Helper functions ---
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
@@ -62,27 +67,59 @@ def verify_token(token: str):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
-        if username is None or username not in users:
+        if username is None:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        # Check user exists in DB
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cur.execute("SELECT username FROM users WHERE username = %s", (username,))
+        user = cur.fetchone()
+        cur.close()
+        conn.close()
+        if not user:
             raise HTTPException(status_code=401, detail="Invalid token")
         return username
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
+def hash_password(plain_password: str) -> str:
+    return bcrypt.hashpw(plain_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
 # --- Routes ---
+@app.get("/hello")
+def hello_world():
+    return {"message": "Hello World From GM61 BridgePoint!"}
+
 @app.post("/login", response_model=TokenResponse)
 def login(data: LoginRequest):
-    username = data.username
-    password = data.password    
-    if username in users and users[username]["password"] == password:
-        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-        access_token = create_access_token(
-            data={"sub": username}, expires_delta=access_token_expires
-        )
-        return {"access_token": access_token, "token_type": "bearer"}
-    else:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cur.execute("SELECT username, password_hash FROM users WHERE username = %s", (data.username,))
+        user = cur.fetchone()
+        cur.close()
+        conn.close()
 
-@app.get("/data")
-def get_data(token: str = Depends(oauth2_scheme)):
-    username = verify_token(token)
-    return {"records": mock_data}
+        if user and bcrypt.checkpw(data.password.encode('utf-8'), user["password_hash"].encode('utf-8')):
+            access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+            access_token = create_access_token(
+                data={"sub": user["username"]}, expires_delta=access_token_expires
+            )
+            return {"access_token": access_token, "token_type": "bearer"}
+        else:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/users")
+def get_users(token: str = Depends(oauth2_scheme)):
+    verify_token(token)
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cur.execute("SELECT id, username, role, environment_id FROM users")
+    users = cur.fetchall()
+    cur.close()
+    conn.close()
+    return {"users": [dict(user) for user in users]}

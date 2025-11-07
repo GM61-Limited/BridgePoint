@@ -5,6 +5,10 @@ services:
     container_name: BridgePointWebServer
     ports:
       - "80:80"
+    networks:
+      - bridgepoint-network
+    depends_on:
+      - backend
 
   backend:
     build:
@@ -12,6 +16,14 @@ services:
     container_name: BridgePointBackend
     ports:
       - "8000:8000"
+    environment:
+      DB_HOST: database
+      DB_PORT: 5432
+      DB_NAME: bridgepointdb
+      DB_USER: gm61admin
+      DB_PASSWORD: camioninsta
+    networks:
+      - bridgepoint-network
     depends_on:
       - database
 
@@ -23,11 +35,17 @@ services:
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_DB: finance_db
-      POSTGRES_USER: finance_user
-      POSTGRES_PASSWORD: securepassword
+      POSTGRES_DB: bridgepointdb
+      POSTGRES_USER: gm61admin
+      POSTGRES_PASSWORD: camioninsta
     volumes:
       - finance_data:/var/lib/postgresql/data
+    networks:
+      - bridgepoint-network
 
 volumes:
   finance_data: {}
+
+networks:
+  bridgepoint-network:
+    driver: bridge
