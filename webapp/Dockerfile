@@ -4,8 +4,8 @@
 # Stage 2: Nginx runtime
 FROM nginx:alpine
 
-# Copy static website files into Nginx HTML directory
-COPY ./html /usr/share/nginx/html
+# Copy all static website files (HTML, CSS, JS, fragments) into Nginx HTML directory
+COPY ./html/ /usr/share/nginx/html/
 
 # Copy custom Nginx config (optional, but best practice)
 COPY ./nginx.conf /etc/nginx/conf.d/default.conf

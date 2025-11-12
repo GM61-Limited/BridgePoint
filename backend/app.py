@@ -36,6 +36,11 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str
 
+class EnvironmentResponse(BaseModel):
+    id: int
+    name: str
+    domain: str
+
 import os
 
 # --- Database config ---
@@ -82,6 +87,16 @@ def verify_token(token: str):
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
+def get_env_id_from_token(token: str) -> int:
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        env_id = payload.get("env_id")
+        if env_id is None:
+            raise HTTPException(status_code=401, detail="Invalid token: environment ID missing")
+        return env_id
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
 def hash_password(plain_password: str) -> str:
     return bcrypt.hashpw(plain_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
@@ -95,7 +110,7 @@ def login(data: LoginRequest):
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        cur.execute("SELECT username, password_hash FROM users WHERE username = %s", (data.username,))
+        cur.execute("SELECT username, password_hash, environment_id FROM users WHERE username = %s", (data.username,))
         user = cur.fetchone()
         cur.close()
         conn.close()
@@ -103,9 +118,10 @@ def login(data: LoginRequest):
         if user and bcrypt.checkpw(data.password.encode('utf-8'), user["password_hash"].encode('utf-8')):
             access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
             access_token = create_access_token(
-                data={"sub": user["username"]}, expires_delta=access_token_expires
+                data={"sub": user["username"], "env_id": user["environment_id"]},
+                expires_delta=access_token_expires
             )
-            return {"access_token": access_token, "token_type": "bearer"}
+            return {"access_token": access_token, "token_type": "bearer", "environment_id": user["environment_id"]}
         else:
             raise HTTPException(status_code=401, detail="Invalid credentials")
     except Exception as e:
@@ -123,3 +139,21 @@ def get_users(token: str = Depends(oauth2_scheme)):
     cur.close()
     conn.close()
     return {"users": [dict(user) for user in users]}
+
+@app.get("/environment", response_model=EnvironmentResponse)
+def get_environment(token: str = Depends(oauth2_scheme)):
+    env_id = get_env_id_from_token(token)
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cur.execute("SELECT id, name, domain FROM environment WHERE id = %s", (env_id,))
+        environment = cur.fetchone()
+        cur.close()
+        conn.close()
+        if not environment:
+            raise HTTPException(status_code=404, detail="Environment not found")
+        return EnvironmentResponse(id=environment["id"], name=environment["name"], domain=environment["domain"])
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
