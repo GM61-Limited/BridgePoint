@@ -5,7 +5,7 @@ FROM python:3.9-slim
 WORKDIR /app
 
 # Copy app files
-COPY app.py /app/
+COPY api/app.py /app/
 
 # Install dependencies
 RUN pip install --no-cache-dir fastapi uvicorn PyJWT bcrypt psycopg2-binary
