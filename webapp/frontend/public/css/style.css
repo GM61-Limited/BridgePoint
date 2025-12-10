@@ -1,135 +1,157 @@
-/* Full-page background */
-html, body {
-    height: 100%;
-    margin: 0;
-    padding: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    background: url('../images/background.png') no-repeat center center fixed;
-    background-size: cover;
-    display: flex;
-    justify-content: center;
-    align-items: center;
+
+/* ============================================================================
+   BridgePoint Login Page — Scoped Styles
+   Applies ONLY when <body> has class "login-view"
+   (set by BodyClassSync in App.tsx). No global html/body selectors.
+   ============================================================================ */
+
+/* Background only (no centering here) */
+body.login-view {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+               Roboto, Helvetica, Arial, sans-serif;
+
+  /* If image lives in /public/images, use absolute path: */
+  background: url("/images/background.png") center center / cover fixed no-repeat;
+
+  /* Ensure viewport height is available across devices */
+  min-height: 100vh;
+  height: 100dvh;
+}
+
+/* The wrapper that fills the viewport and centers the card */
+body.login-view .login-page {
+  /* Full viewport size */
+  min-height: 100vh;
+  height: 100dvh;
+
+  /* Perfect centering */
+  display: grid;
+  place-items: center;
+
+  /* Small padding prevents the card touching screen edges on very small devices */
+  padding: 16px;
 }
 
 /* Floating login card */
-.login-card {
-    background: rgba(255, 255, 255, 0.95);
-    padding: 40px 30px;
-    border-radius: 20px;
-    box-shadow: 0 15px 30px rgba(0,0,0,0.25);
-    text-align: center;
-    width: 360px;
-    max-width: 90%;
-    backdrop-filter: blur(10px);
+body.login-view .login-card {
+  background: rgba(255, 255, 255, 0.95);
+  padding: 40px 30px;
+  border-radius: 20px;
+  box-shadow: 0 15px 30px rgba(0,0,0,0.25);
+  text-align: center;
+  width: 360px;
+  max-width: 100%;
+  backdrop-filter: blur(10px);
+  animation: floatIn 0.8s ease-out forwards;
+}
+
+/* --- Fit & alignment fixes (keep controls inside the island) --- */
+body.login-view .login-card *,
+body.login-view .login-card *::before,
+body.login-view .login-card *::after {
+  box-sizing: border-box; /* width:100% includes padding + border */
 }
 
 /* Title */
-.login-card h1 {
-    margin-bottom: 25px;
-    font-size: 28px;
-    font-weight: 600;
-    color: #1c1c1e;
+body.login-view .login-card h1 {
+  margin-bottom: 25px; /* no top margin that could push things upward */
+  font-size: 28px;
+  font-weight: 600;
+  color: #1c1c1e;
 }
 
-/* Input fields */
-.login-card input {
-    width: 100%;
-    padding: 14px 15px;
-    margin: 12px 0;
-    border: 1px solid #ccc;
-    border-radius: 12px;
-    box-sizing: border-box;
-    font-size: 16px;
+/* Inputs */
+body.login-view .login-card input {
+  width: 100%;
+  padding: 14px 15px;
+  margin: 12px 0;
+  border: 1px solid #ccc;          /* keep your original tone */
+  border-radius: 12px;
+  font-size: 16px;
+  background: #fff;
+  color: #1c1c1e;
 }
 
-/* Buttons */
-.login-card button {
-    width: 100%;
-    padding: 14px;
-    margin-top: 15px;
-    border: none;
-    border-radius: 12px;
-    background-color: #007aff;
-    color: white;
-    font-size: 17px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.25s ease;
+/* Submit button */
+body.login-view .login-card button[type="submit"] {
+  width: 100%;
+  padding: 14px;
+  margin-top: 15px;
+  border: none;
+  border-radius: 12px;
+  background-color: #007aff;
+  color: #fff;
+  font-size: 17px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.25s ease;
+}
+body.login-view .login-card button[type="submit"]:hover {
+  background-color: #005bb5;
 }
 
-.login-card button:hover {
-    background-color: #005bb5;
+/* Error message */
+body.login-view #login-error {
+  color: #d32f2f;
+  font-size: 14px;
 }
 
 /* Divider */
-.divider {
-    display: flex;
-    align-items: center;
-    text-align: center;
-    margin: 25px 0;
+body.login-view .divider {
+  display: flex;
+  align-items: center;
+  text-align: center;
+  margin: 25px 0;
 }
-
-.divider::before,
-.divider::after {
-    content: '';
-    flex: 1;
-    height: 1px;
-    background: #d1d1d6;
+body.login-view .divider::before,
+body.login-view .divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: #d1d1d6;
 }
-
-.divider span {
-    margin: 0 12px;
-    color: #6e6e73;
-    font-size: 14px;
-    font-weight: 500;
-    background: none; /* Remove the bubble */
-    padding: 0;
+body.login-view .divider span {
+  margin: 0 12px;
+  color: #6e6e73;
+  font-size: 14px;
+  font-weight: 500;
+  background: none;
+  padding: 0;
 }
 
 /* Social buttons */
-.social-buttons button {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin: 8px 0;
-    padding: 12px;
-    border: 1px solid #ccc;
-    background: white;
-    cursor: pointer;
-    border-radius: 12px;
-    transition: background 0.25s ease, transform 0.15s ease;
+body.login-view .social-buttons {
+  /* ensure the container doesn’t constrain width */
+}
+body.login-view .social-buttons button {
+  display: flex;                    /* fills width cleanly even if inline styles use inline-flex */
+  align-items: center;
+  justify-content: center;
+  width: 100%;                      /* match inputs + primary button */
+  margin: 8px 0;
+  padding: 12px;
+  border: 1px solid #ccc;           /* keep consistent with inputs; inline 'border: none' will win */
+  background: #fff;
+  cursor: pointer;
+  border-radius: 12px;
+  transition: background 0.25s ease, transform 0.15s ease;
+}
+body.login-view .social-buttons button img {
+  width: 22px;
+  height: 22px;
+  margin-right: 10px;
+}
+body.login-view .social-buttons button:hover {
+  background: #f2f2f7;
+  transform: translateY(-2px);
 }
 
-.social-buttons button img {
-    width: 22px;
-    height: 22px;
-    margin-right: 10px;
-}
-
-.social-buttons button:hover {
-    background: #f2f2f7;
-    transform: translateY(-2px);
-}
-
-/* Animation for floating login card */
+/* Entry animation keyframes */
 @keyframes floatIn {
-    0% {
-        opacity: 0;
-        transform: translateY(50px) scale(0.95);
-    }
-    60% {
-        opacity: 1;
-        transform: translateY(-10px) scale(1.02);
-    }
-    80% {
-        transform: translateY(5px) scale(0.99);
-    }
-    100% {
-        transform: translateY(0) scale(1);
-    }
-}
-
-.login-card {
-    /* existing styles */
-    animation: floatIn 0.8s ease-out forwards;
+  0%   { opacity: 0; transform: translateY(50px) scale(0.95); }
+  60%  { opacity: 1; transform: translateY(-10px) scale(1.02); }
+  80%  {               transform: translateY(5px)  scale(0.99); }
+  100% {               transform: translateY(0)    scale(1); }
 }

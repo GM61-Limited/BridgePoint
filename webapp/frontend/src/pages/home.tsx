@@ -1,6 +1,6 @@
 
 import React from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 
 /** Adjust to your build setup: in dev use http://localhost:8000; in prod use /api behind Nginx */
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
@@ -34,11 +34,17 @@ function getTokenFromStorage(): string | null {
 
 const Home: React.FC<HomeProps> = ({ token }) => {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [user, setUser] = React.useState<MeResponse | null>(null);
   const [env, setEnv] = React.useState<EnvironmentResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+
+  // Compute the navbar label: hostname + pathname (e.g., "localhost/home")
+  const host = typeof window !== "undefined" ? window.location.hostname : "localhost";
+  const path = location.pathname || "/home";
+  const navLabel = `${host}${path}`;
 
   React.useEffect(() => {
     const abort = new AbortController();
@@ -98,11 +104,25 @@ const Home: React.FC<HomeProps> = ({ token }) => {
     return () => abort.abort();
   }, [token, navigate]);
 
-  const displayName =
-    user?.name?.trim() ? user.name : "there"; // fallback if name is empty
+  const displayName = user?.name?.trim() ? user.name : "there"; // fallback if name is empty
 
   return (
     <div className="container-fluid">
+      {/* Top navbar with current location */}
+      <nav
+        className="d-flex align-items-center justify-content-between py-2"
+        aria-label="Primary"
+        style={{ borderBottom: "1px solid #eee" }}
+      >
+        <div className="d-flex align-items-center gap-2">
+          <span className="text-secondary small">You are here:</span>
+          <strong>{navLabel}</strong>
+        </div>
+
+        {/* Environment badge (optional) */}
+        {env && <span className="badge bg-secondary">{env.name}</span>}
+      </nav>
+
       {/* Page header */}
       <header className="py-3 d-flex align-items-center justify-content-between">
         <div>
@@ -110,12 +130,8 @@ const Home: React.FC<HomeProps> = ({ token }) => {
           <p className="text-secondary mb-0">Here’s your BridgePoint overview.</p>
         </div>
 
-        {/* Environment badge (optional) */}
-        {env && (
-          <span className="badge bg-secondary">
-            {env.name}
-          </span>
-        )}
+        {/* If you prefer the badge only in the navbar, remove this block */}
+        {/* {env && <span className="badge bg-secondary">{env.name}</span>} */}
       </header>
 
       {loading && (
