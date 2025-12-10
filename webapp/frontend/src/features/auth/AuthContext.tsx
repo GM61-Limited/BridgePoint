@@ -1,15 +1,25 @@
 
 // src/features/auth/AuthContext.tsx
 import React, {
-    createContext,
-    useCallback,
-    useContext,
-    useEffect,
-    useMemo,
-    useState,
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
 } from 'react';
 import type { User } from '../../lib/api';
 import * as api from '../../lib/api';
+
+const TOKEN_KEY = 'bp_token';
+
+// Build a login path that respects Vite's BASE_URL and trailing slashes.
+function buildLoginPath(): string {
+  const base = (import.meta as any)?.env?.BASE_URL ?? '/';
+  // Ensure base ends with '/', then append 'login'
+  const normalisedBase = base.endsWith('/') ? base : `${base}/`;
+  return `${normalisedBase}login`;
+}
 
 type AuthState = {
   user: User | null;
@@ -41,42 +51,58 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     bootstrapping: true,
   });
 
-  // Keep axios Authorization header in sync with our token
+  // Hydrate token synchronously so guards can decide immediately.
+  useEffect(() => {
+    const stored = localStorage.getItem(TOKEN_KEY);
+    if (stored) {
+      setState((s) => ({ ...s, token: stored }));
+      api.setToken(stored);
+    }
+  }, []);
+
+  // Keep API client header in sync
   useEffect(() => {
     api.setToken(state.token ?? null);
   }, [state.token]);
 
-  // Bootstrap session on first load (cookie-based or after OAuth)
+  // Bootstrap user profile (optional)
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const me = await api.getMe();
-        if (!cancelled && me) {
-          setState((s) => ({ ...s, user: me }));
+        if (state.token) {
+          const me = await api.getMe();
+          if (!cancelled && me) {
+            setState((s) => ({ ...s, user: me }));
+          }
         }
       } catch {
-        // ignore — not logged in yet or /me not implemented
-      } finally {
+        // token invalid → clear it to avoid loops
         if (!cancelled) {
-          setState((s) => ({ ...s, bootstrapping: false }));
+          localStorage.removeItem(TOKEN_KEY);
+          setState((s) => ({ ...s, token: null }));
+          api.setToken(null);
         }
+      } finally {
+        if (!cancelled) setState((s) => ({ ...s, bootstrapping: false }));
       }
     })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.token]);
 
   const setAuth = useCallback(
     ({ token, user }: { token?: string | null; user?: User | null }) => {
       setState((prev) => {
         const next: AuthState = {
           token: token !== undefined ? token : prev.token,
-          user: user !== undefined ? user : prev.user,
+          user:  user  !== undefined ? user  : prev.user,
           bootstrapping: false,
         };
-        // Sync axios Authorization header
+        if (token !== undefined) {
+          if (token) localStorage.setItem(TOKEN_KEY, token);
+          else localStorage.removeItem(TOKEN_KEY);
+        }
         api.setToken(next.token ?? null);
         return next;
       });
@@ -84,40 +110,71 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
-  const clearAuth = useCallback(() => setAuth({ token: null, user: null }), [setAuth]);
+  const clearAuth = useCallback(() => {
+    try {
+      localStorage.removeItem(TOKEN_KEY);
+      sessionStorage.clear(); // optional: nuke ephemeral UI state
+    } catch { /* ignore storage errors */ }
+    api.setToken(null);
+    setState({ token: null, user: null, bootstrapping: false });
+  }, []);
 
   const login = useCallback(async (username: string, password: string) => {
-    // api.login() returns { token, user? } — user is null with your backend
-    const payload = await api.login(username, password);
+    const payload = await api.login(username, password); // { token, user? }
     const token = payload?.token ?? null;
-    const user = payload?.user ?? null;
+    const user  = payload?.user ?? null;
 
     setAuth({ token, user });
 
-    // If backend didn’t return user details, try to fetch them (optional)
-    if (!user) {
+    if (!user && token) {
       const me = await api.getMe().catch(() => null);
       if (me) setAuth({ user: me });
     }
   }, [setAuth]);
 
+  /**
+   * Logout that fully refreshes the app:
+   * - best-effort server call
+   * - clear client state + storage
+   * - optionally clear SW caches
+   * - hard redirect to /login (replace)
+   */
   const logout = useCallback(async () => {
     try {
-      await api.logout(); // safe even for JWT-only backends
+      await api.logout(); // safe even if not implemented
     } catch {
-      // ignore failures; still clear client state
-    } finally {
-      clearAuth();
+      // ignore; client cleanup continues
+    }
+
+    // Client cleanup
+    clearAuth();
+
+    // Optional: clear Service Worker caches if you use a SW (harmless if not)
+    try {
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k)));
+      }
+    } catch { /* ignore cache cleanup errors */ }
+
+    // Hard refresh to login (replace avoids back-to-protected pages)
+    const loginPath = buildLoginPath();
+    if (window.location.pathname === loginPath) {
+      window.location.reload();           // already at /login → just reload
+    } else {
+      window.location.replace(loginPath); // full navigation & reload
     }
   }, [clearAuth]);
 
-  const refreshSession = useCallback(async () => {
-    const me = await api.getMe().catch(() => null);
-    setAuth({ user: me ?? null });
-  }, [setAuth]);
+  // Optional: global 401 → logout
+  useEffect(() => {
+    const onUnauthorised = () => void logout();
+    window.addEventListener('bp:unauthorised', onUnauthorised);
+    return () => window.removeEventListener('bp:unauthorised', onUnauthorised);
+  }, [logout]);
 
   const value = useMemo<AuthCtx>(() => {
-    const isAuthenticated = !!state.token || !!state.user;
+    const isAuthenticated = !!state.token; // JWT is the source of truth
     return {
       user: state.user,
       token: state.token,
@@ -127,9 +184,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       clearAuth,
       login,
       logout,
-      refreshSession,
+      refreshSession: async () => {
+        const me = await api.getMe().catch(() => null);
+        setAuth({ user: me ?? null });
+      },
     };
-  }, [state, setAuth, clearAuth, login, logout, refreshSession]);
+  }, [state, setAuth, clearAuth, login, logout]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

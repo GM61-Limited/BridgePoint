@@ -1,12 +1,12 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../features/auth/AuthContext';
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { login, isAuthenticated } = useAuth();
+  const { login } = useAuth();
 
   // If a protected route sent us here, it stored the original URL in state.from
   const from = (location.state as any)?.from?.pathname || '/';
@@ -16,24 +16,6 @@ export default function LoginPage() {
   const [isLoading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [msUnavailable, setMsUnavailable] = useState(false);
-
-  /** Ensure the background + scoped styles apply while this page is active.
-   *  If you already have BodyClassSync in App.tsx doing this globally,
-   *  you can delete this effect. Keeping it here is safe and idempotent.
-   */
-  useEffect(() => {
-    document.body.classList.add('login-view');
-    return () => {
-      document.body.classList.remove('login-view');
-    };
-  }, []);
-
-  // Redirect after auth flips
-  useEffect(() => {
-    if (isAuthenticated) {
-      navigate(from, { replace: true });
-    }
-  }, [isAuthenticated, from, navigate]);
 
   async function handleLogin(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -49,7 +31,9 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await login(u, p);
-      // no navigate here; the effect above will handle redirect
+      // Navigate to the original destination (or Home) with replace
+      // so the back button doesn't return to /login.
+      navigate(from, { replace: true });
     } catch (err: any) {
       const status = err?.response?.status;
       const serverMsg =
@@ -64,7 +48,7 @@ export default function LoginPage() {
       } else if (serverMsg) {
         setError(serverMsg);
       } else if (err?.message?.toLowerCase().includes('network')) {
-        setError('Network error: check Nginx proxy (/api) and backend reachability.');
+        setError('Network error: check /api proxy and backend availability.');
       } else {
         setError(`Login failed: ${err?.message ?? 'Unknown error'}`);
       }
@@ -103,6 +87,8 @@ export default function LoginPage() {
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             autoComplete="username"
+            autoFocus
+            disabled={isLoading}
           />
           <input
             type="password"
@@ -112,6 +98,7 @@ export default function LoginPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
+            disabled={isLoading}
           />
 
           {error && (
@@ -141,7 +128,7 @@ export default function LoginPage() {
             type="button"
             onClick={handleMicrosoftLogin}
             aria-label="Sign in with Microsoft"
-            disabled={msUnavailable}
+            disabled={msUnavailable || isLoading}
             title={msUnavailable ? "Microsoft sign-in isn't available right now" : undefined}
             style={{
               backgroundColor: '#2F2F2F',

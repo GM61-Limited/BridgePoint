@@ -1,52 +1,116 @@
 
-// src/pages/_layout.tsx
-import React from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+// src/pages/layout.tsx
+import React, { useEffect, useState } from "react";
+import { NavLink, Outlet } from "react-router-dom";
+import { useAuth } from "../features/auth/AuthContext";
 
 /** Dev: http://localhost:8000 ; Prod: /api behind Nginx */
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 type EnvironmentResponse = { id: number; name: string; domain: string };
+type Theme = "system" | "light" | "dark";
+const THEME_KEY = "bp_theme";
 
-function getTokenFromStorage(): string | null {
-  return sessionStorage.getItem("bp_token") || localStorage.getItem("bp_token") || null;
+/** Resolve the actual theme (light/dark) from a logical theme */
+function resolveTheme(t: Theme): "light" | "dark" {
+  if (t === "system") {
+    return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  return t;
+}
+
+/** Apply theme to the document (Bootstrap 5.3 color modes) */
+function applyTheme(t: Theme) {
+  const actual = resolveTheme(t);
+  document.documentElement.setAttribute("data-bs-theme", actual);
 }
 
 export default function Layout() {
-  const navigate = useNavigate();
-  const [collapsed, setCollapsed] = React.useState(false);
-  const [env, setEnv] = React.useState<EnvironmentResponse | null>(null);
+  const { token, logout } = useAuth(); // token for /environment; logout does hard refresh
+  const [collapsed, setCollapsed] = useState(false);
+  const [env, setEnv] = useState<EnvironmentResponse | null>(null);
+  const [signingOut, setSigningOut] = useState(false);
 
-  // Fetch environment for topbar badge (Home also shows it; showing here helps everywhere)
-  React.useEffect(() => {
+  // --- Theme state ---
+  const [theme, setTheme] = useState<Theme>(() => {
+    const saved = (localStorage.getItem(THEME_KEY) as Theme) || "system";
+    return saved === "light" || saved === "dark" || saved === "system" ? saved : "system";
+  });
+
+  // Apply theme on mount and whenever it changes
+  useEffect(() => {
+    applyTheme(theme);
+    localStorage.setItem(THEME_KEY, theme);
+  }, [theme]);
+
+  // React to OS theme changes when in "system" mode
+  useEffect(() => {
+    const media = window.matchMedia?.("(prefers-color-scheme: dark)");
+    if (!media) return;
+    const onChange = () => {
+      if (theme === "system") applyTheme("system");
+    };
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, [theme]);
+
+  // Environment badge fetch (runs when token is available/changes)
+  useEffect(() => {
     const abort = new AbortController();
     async function loadEnv() {
       try {
-        const jwt = getTokenFromStorage();
-        if (!jwt) return;
+        if (!token) return;
         const res = await fetch(`${API_BASE}/environment`, {
-          headers: { Authorization: `Bearer ${jwt}` },
+          headers: { Authorization: `Bearer ${token}` },
           signal: abort.signal,
         });
         if (res.ok) setEnv(await res.json());
-      } catch {/* ignore */}
+      } catch {
+        // ignore network/API errors for the badge
+      }
     }
     loadEnv();
     return () => abort.abort();
-  }, []);
+  }, [token]);
 
-  function handleSignOut() {
-    sessionStorage.removeItem("bp_token");
-    localStorage.removeItem("bp_token");
-    navigate("/login");
+  // ---- Sign out handler ----
+  async function handleSignOut() {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      await logout(); // hard refresh to /login
+    } catch {
+      setSigningOut(false);
+    }
   }
+
+  // Button outlines should contrast in both themes
+  const actualTheme = resolveTheme(theme);
+  const btnOutline = actualTheme === "dark" ? "btn-outline-light" : "btn-outline-dark";
+
+  // Toggle handler:
+  // - normal click: flip light <-> dark based on the actual theme
+  // - Alt+click: reset to system (follow OS)
+  function handleThemeToggle(e: React.MouseEvent<HTMLButtonElement>) {
+    if (e.altKey) {
+      setTheme("system");
+      return;
+    }
+    const next = actualTheme === "dark" ? "light" : "dark";
+    setTheme(next);
+  }
+
+  // Icon reflects the current actual theme
+  const iconClass = actualTheme === "dark" ? "bi-sun" : "bi-moon";
+  const toggleTitle =
+    actualTheme === "dark" ? "Switch to light (Alt: follow system)" : "Switch to dark (Alt: follow system)";
 
   return (
     <div className={`app-shell d-flex ${collapsed ? "sidebar-collapsed" : ""}`}>
 
       {/* ---------- Sidebar ---------- */}
-      <aside className="sidebar text-white">
-        <div className="px-3 py-3 d-flex align-items-center border-bottom border-secondary">
+      <aside className="sidebar">
+        <div className="px-3 py-3 d-flex align-items-center border-bottom">
           <i className="bi bi-hdd-stack fs-4 me-2" aria-hidden="true" />
           <span className="fw-semibold sidebar-label">BridgePoint</span>
         </div>
@@ -94,9 +158,9 @@ export default function Layout() {
           </NavLink>
         </nav>
 
-        <div className="mt-auto px-3 py-3 border-top border-secondary">
+        <div className="mt-auto px-3 py-3 border-top">
           <button
-            className="btn btn-sm btn-outline-light w-100 d-flex align-items-center justify-content-center"
+            className="btn btn-sm btn-outline-secondary w-100 d-flex align-items-center justify-content-center"
             onClick={() => setCollapsed(!collapsed)}
             aria-pressed={collapsed}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -115,11 +179,41 @@ export default function Layout() {
             <span className="badge bg-secondary">{env ? env.name : "Environment"}</span>
 
             <div className="d-flex align-items-center gap-2">
-              <button className="btn btn-sm btn-outline-light">
+              {/* Notifications */}
+              <button className={`btn btn-sm ${btnOutline}`}>
                 <i className="bi bi-bell" aria-hidden="true" /> <span className="sidebar-label">Notifications</span>
               </button>
-              <button className="btn btn-sm btn-light" onClick={handleSignOut}>
-                <i className="bi bi-box-arrow-right" aria-hidden="true" /> <span className="sidebar-label">Sign out</span>
+
+              {/* Single theme toggle button (sun/moon only) */}
+              <button
+                type="button"
+                className={`btn btn-sm ${btnOutline}`}
+                onClick={handleThemeToggle}
+                title={toggleTitle}
+                aria-label="Toggle color mode"
+              >
+                <i className={`bi ${iconClass}`} aria-hidden="true" />
+              </button>
+
+              {/* Sign out */}
+              <button
+                className="btn btn-sm btn-primary"
+                onClick={handleSignOut}
+                disabled={signingOut}
+                aria-label="Sign out"
+                title="Sign out"
+              >
+                {signingOut ? (
+                  <>
+                    <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true" />
+                    <span className="sidebar-label">Signing out…</span>
+                  </>
+                ) : (
+                  <>
+                    <i className="bi bi-box-arrow-right" aria-hidden="true" />{" "}
+                    <span className="sidebar-label">Sign out</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

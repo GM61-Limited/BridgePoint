@@ -1,8 +1,9 @@
 
 /* Global app look-and-feel (used everywhere except /login) */
 body.app-view {
-  background: #0f1115; /* Dark app background */
-  color: #e5e7eb;
+  /* Follow Bootstrap color mode */
+  background-color: var(--bs-body-bg);
+  color: var(--bs-body-color);
   min-height: 100vh;
 }
 
@@ -12,57 +13,78 @@ body.app-view {
   min-height: 100vh;
 }
 
-/* Sidebar */
+/* Sidebar
+   - Use theme variables so it adapts to light/dark
+   - If your JSX still has className="sidebar text-white", remove 'text-white'
+*/
 .sidebar {
   width: 264px;
-  border-right: 1px solid #23262b;
-  background: #111318; /* near-black, not pure black for contrast */
+  background-color: var(--bs-tertiary-bg);
+  color: var(--bs-body-color);
+  border-right: 1px solid var(--bs-border-color);
 }
+
 .sidebar .nav-link {
   padding: 0.5rem 0.75rem;
   border-radius: 0.375rem;
-  color: #cfd3da;
-  transition: background 0.15s ease, color 0.15s ease;
+  color: var(--bs-body-color);
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
+
 .sidebar .nav-link:hover,
 .sidebar .nav-link.active {
-  background: #1b1f25;
-  color: #fff;
+  background-color: var(--bs-secondary-bg);
+  color: var(--bs-body-color);
 }
 
 /* Collapsed sidebar (icons only) */
 .app-shell.sidebar-collapsed .sidebar { width: 72px; }
+
 .sidebar .sidebar-label { transition: opacity 0.2s ease; }
+
 .app-shell.sidebar-collapsed .sidebar .sidebar-label {
   opacity: 0; width: 0; height: 0; overflow: hidden; position: absolute;
 }
 
-/* Topbar */
+/* Topbar follows theme */
 .topbar {
-  background: #0f1115;
-  border-bottom: 1px solid #23262b;
+  background-color: var(--bs-body-bg);
+  color: var(--bs-body-color);
+  border-bottom: 1px solid var(--bs-border-color);
 }
 
 /* Cards & panels (Home page, etc.) */
 .card {
-  background: #16181d;
-  border-color: #23262b;
+  background-color: var(--bs-card-bg);
+  color: var(--bs-card-color, var(--bs-body-color));
+  border-color: var(--bs-card-border-color, var(--bs-border-color));
   border-radius: 12px;
 }
+
 .card .card-header {
-  background: transparent;
-  border-bottom: 1px solid #23262b;
-  color: #e5e7eb;
+  background-color: transparent;
+  border-bottom: 1px solid var(--bs-border-color);
+  color: inherit;
 }
-.card .card-body { color: #e5e7eb; }
+
+.card .card-body { color: inherit; }
 
 /* Home hero band */
 .home-v2 .hero {
-  background: linear-gradient(90deg, rgba(0,122,255,0.08), rgba(102,187,255,0.08));
-  border: 1px solid #23262b;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--bs-primary), transparent 92%),
+    color-mix(in srgb, var(--bs-info),    transparent 92%)
+  );
+  border: 1px solid var(--bs-border-color);
   border-radius: 12px;
 }
 
 /* Helpers */
 .border-dashed { border-style: dashed !important; }
-.placeholder { display: inline-block; min-height: 1em; background: #333842; border-radius: 6px; }
+.placeholder {
+  display: inline-block;
+  min-height: 1em;
+  background-color: var(--bs-secondary-bg);
+  border-radius: 6px;
+}

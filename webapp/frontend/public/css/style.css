@@ -41,7 +41,7 @@ body.login-view .login-card {
   border-radius: 20px;
   box-shadow: 0 15px 30px rgba(0,0,0,0.25);
   text-align: center;
-  width: 360px;
+  width: 450px;
   max-width: 100%;
   backdrop-filter: blur(10px);
   animation: floatIn 0.8s ease-out forwards;

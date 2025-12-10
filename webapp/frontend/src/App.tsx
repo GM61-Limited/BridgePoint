@@ -1,17 +1,30 @@
 
 // src/App.tsx
 import { type ReactNode, useEffect } from "react";
-import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import {
+  BrowserRouter,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+} from "react-router-dom";
 import { AuthProvider, useAuth } from "./features/auth/AuthContext";
 
 import LoginPage from "./pages/LoginPage";
 import Home from "./pages/home";
 import Layout from "./pages/layout";
 
-/** Sync body class with current route so login/app backgrounds don't leak */
+/**
+ * Sync body class with the current route, but only after auth bootstrapping.
+ * This avoids background/style flicker during initialisation.
+ */
 function BodyClassSync() {
   const { pathname } = useLocation();
+  const { bootstrapping } = useAuth();
+
   useEffect(() => {
+    if (bootstrapping) return; // don't toggle while we don't know auth
+
     const isLogin = pathname === "/login";
     document.body.classList.toggle("login-view", isLogin);
     document.body.classList.toggle("app-view", !isLogin);
@@ -19,46 +32,61 @@ function BodyClassSync() {
     return () => {
       document.body.classList.remove("login-view", "app-view");
     };
-  }, [pathname]);
+  }, [pathname, bootstrapping]);
+
   return null;
 }
 
-/** Simple full-page spinner to show while auth bootstraps */
+/** Simple full-page spinner shown while auth bootstraps */
 function FullPageSpinner() {
   return (
-    <div className="d-flex align-items-center justify-content-center" style={{ minHeight: "100vh" }}>
-      <div className="spinner-border text-light" role="status" aria-label="Loading" />
+    <div
+      className="d-flex align-items-center justify-content-center"
+      style={{ minHeight: "100vh" }}
+    >
+      <div
+        className="spinner-border text-light"
+        role="status"
+        aria-label="Loading"
+      />
     </div>
   );
 }
 
-/** Guard: only allow access when authenticated; otherwise, send to /login */
+/**
+ * Guard: only allow access when authenticated; otherwise, send to /login.
+ * Uses `replace` to prevent the back button returning to login after success.
+ */
 function ProtectedRoute({ children }: { children?: ReactNode }) {
   const location = useLocation();
-  const { isAuthenticated, bootstrapping, token } = useAuth();
+  const { isAuthenticated, bootstrapping } = useAuth();
 
   if (bootstrapping) return <FullPageSpinner />;
 
-  // Fallback to token presence if isAuthenticated is ever undefined
-  const authed = Boolean(isAuthenticated || token);
-  return authed ? <>{children}</> : <Navigate to="/login" replace state={{ from: location }} />;
+  return isAuthenticated ? (
+    <>{children}</>
+  ) : (
+    <Navigate to="/login" replace state={{ from: location }} />
+  );
 }
 
-/** Guard: if already authenticated, don’t show the login page—go to /home */
+/**
+ * Guard: if already authenticated, don’t show the login page—go to the app.
+ * Uses `replace` so login isn’t left in history.
+ */
 function AnonOnlyRoute({ children }: { children?: ReactNode }) {
-  const { isAuthenticated, bootstrapping, token } = useAuth();
+  const { isAuthenticated, bootstrapping } = useAuth();
 
   if (bootstrapping) return <FullPageSpinner />;
 
-  const authed = Boolean(isAuthenticated || token);
-  return authed ? <Navigate to="/home" replace /> : <>{children}</>;
+  return isAuthenticated ? <Navigate to="/" replace /> : <>{children}</>;
 }
 
 export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
-        {/* Route-aware body class switcher */}
+        {/* Route-aware body class switcher, gated by bootstrapping */}
         <BodyClassSync />
 
         <Routes>
@@ -81,10 +109,10 @@ export default function App() {
               </ProtectedRoute>
             }
           >
-            {/* Redirect the shell's index to the canonical Home route */}
-            <Route index element={<Navigate to="/home" replace />} />
+            {/* Render Home at the shell index to avoid an extra redirect */}
+            <Route index element={<Home />} />
 
-            {/* Named Home route so the URL is localhost/home */}
+            {/* Optional alias: users can still visit /home */}
             <Route path="home" element={<Home />} />
 
             {/* Future protected pages (examples) */}
@@ -93,8 +121,8 @@ export default function App() {
             {/* <Route path="alerts" element={<Alerts />} /> */}
           </Route>
 
-          {/* Catch-all → canonical root */}
-          <Route path="*" element={<Navigate to="/home" replace />} />
+          {/* Catch-all → canonical root; ProtectedRoute will decide */}
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>
