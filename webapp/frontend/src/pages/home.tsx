@@ -1,12 +1,14 @@
 
+// src/pages/home.tsx
 import React from "react";
-import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 
-/** Adjust to your build setup: in dev use http://localhost:8000; in prod use /api behind Nginx */
+/** Dev: http://localhost:8000 ; Prod: /api behind Nginx */
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
+/* ---------------------------- Types ---------------------------- */
 type MeResponse = {
-  name: string;            // from /me
+  name: string;
   roles: string[];
   environment_id: number;
 };
@@ -17,34 +19,34 @@ type EnvironmentResponse = {
   domain: string;
 };
 
+type HealthResponse = {
+  ok: boolean;
+  time?: string;
+};
+
 interface HomeProps {
-  /** If you already keep the token in context, you can pass it here. Otherwise we read from storage. */
+  /** If you already keep the token in context, you can pass it here. Otherwise it’s read from storage. */
   token?: string;
 }
 
-/** Finds a JWT wherever we commonly store it. Edit to match your login page. */
+/* ----------------------- Token utilities ----------------------- */
 function getTokenFromStorage(): string | null {
   return (
-    // Prefer sessionStorage in most SPAs to auto-expire with tab
     sessionStorage.getItem("bp_token") ||
     localStorage.getItem("bp_token") ||
     null
   );
 }
 
+/* -------------------------- Component -------------------------- */
 const Home: React.FC<HomeProps> = ({ token }) => {
   const navigate = useNavigate();
-  const location = useLocation();
 
   const [user, setUser] = React.useState<MeResponse | null>(null);
   const [env, setEnv] = React.useState<EnvironmentResponse | null>(null);
+  const [health, setHealth] = React.useState<HealthResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
-
-  // Compute the navbar label: hostname + pathname (e.g., "localhost/home")
-  const host = typeof window !== "undefined" ? window.location.hostname : "localhost";
-  const path = location.pathname || "/home";
-  const navLabel = `${host}${path}`;
 
   React.useEffect(() => {
     const abort = new AbortController();
@@ -60,11 +62,12 @@ const Home: React.FC<HomeProps> = ({ token }) => {
           navigate("/login");
           return;
         }
+        const headers = { Authorization: `Bearer ${jwt}` };
 
         // ---- /me
         const meRes = await fetch(`${API_BASE}/me`, {
           method: "GET",
-          headers: { Authorization: `Bearer ${jwt}` },
+          headers,
           signal: abort.signal,
         });
 
@@ -84,7 +87,7 @@ const Home: React.FC<HomeProps> = ({ token }) => {
         // ---- /environment (optional badge)
         const envRes = await fetch(`${API_BASE}/environment`, {
           method: "GET",
-          headers: { Authorization: `Bearer ${jwt}` },
+          headers,
           signal: abort.signal,
         });
         if (envRes.ok) {
@@ -92,9 +95,19 @@ const Home: React.FC<HomeProps> = ({ token }) => {
           setEnv(envData);
         }
 
+        // ---- /health (API health)
+        const healthRes = await fetch(`${API_BASE}/health`, {
+          method: "GET",
+          signal: abort.signal,
+        });
+        if (healthRes.ok) {
+          const healthData: HealthResponse = await healthRes.json();
+          setHealth(healthData);
+        }
       } catch (e: any) {
-        if (e?.name === "AbortError") return;
-        setError(e?.message ?? "Something went wrong");
+        if (e?.name !== "AbortError") {
+          setError(e?.message ?? "Something went wrong");
+        }
       } finally {
         setLoading(false);
       }
@@ -104,103 +117,102 @@ const Home: React.FC<HomeProps> = ({ token }) => {
     return () => abort.abort();
   }, [token, navigate]);
 
-  const displayName = user?.name?.trim() ? user.name : "there"; // fallback if name is empty
+  const displayName = user?.name?.trim() ? user.name : "there";
 
   return (
-    <div className="container-fluid">
-      {/* Top navbar with current location */}
-      <nav
-        className="d-flex align-items-center justify-content-between py-2"
-        aria-label="Primary"
-        style={{ borderBottom: "1px solid #eee" }}
-      >
-        <div className="d-flex align-items-center gap-2">
-          <span className="text-secondary small">You are here:</span>
-          <strong>{navLabel}</strong>
+    <div className="home-v2 container-fluid">
+      {/* Hero band */}
+      <section className="hero mt-3 p-3 p-sm-4 rounded-4">
+        <div className="d-flex align-items-center gap-3 flex-wrap">
+          {/* Logo from /public/images */}
+          <img
+            src="/images/bridgepointAlt.png"
+            alt="BridgePoint"
+            className="hero-logo"
+            style={{ width: 48, height: 48 }}
+          />
+          <div>
+            <h1 className="h4 mb-1">Welcome, {displayName}</h1>
+            <p className="mb-0 text-secondary">
+              Secure integration platform for sterile services—connect, orchestrate, and surface insights.
+            </p>
+          </div>
+          {env && (
+            <div className="ms-auto">
+              <span className="badge bg-light text-dark border">
+                {env.name} · {env.domain}
+              </span>
+            </div>
+          )}
         </div>
+      </section>
 
-        {/* Environment badge (optional) */}
-        {env && <span className="badge bg-secondary">{env.name}</span>}
-      </nav>
-
-      {/* Page header */}
-      <header className="py-3 d-flex align-items-center justify-content-between">
-        <div>
-          <h1 className="h3 mb-1">Welcome, {displayName}</h1>
-          <p className="text-secondary mb-0">Here’s your BridgePoint overview.</p>
-        </div>
-
-        {/* If you prefer the badge only in the navbar, remove this block */}
-        {/* {env && <span className="badge bg-secondary">{env.name}</span>} */}
-      </header>
-
+      {/* Loading / errors */}
       {loading && (
-        <div className="alert alert-info" role="status">
+        <div className="alert alert-info mt-3" role="status" aria-live="polite">
           Loading your profile…
         </div>
       )}
-
       {error && (
-        <div className="alert alert-danger" role="alert">
+        <div className="alert alert-danger mt-3" role="alert">
           {error}
         </div>
       )}
 
+      {/* Main content (only when not loading/error) */}
       {!loading && !error && (
         <>
-          {/* Quick navigation tiles */}
-          <section aria-label="Quick navigation" className="mt-3">
+          {/* System status row */}
+          <section className="mt-3" aria-label="System status and profile">
             <div className="row g-3">
-              <div className="col-sm-6 col-lg-4">
-                <div className="card h-100">
-                  <div className="card-body">
-                    <div className="d-flex align-items-center justify-content-between">
-                      <h6 className="card-title mb-0">Pipelines</h6>
-                      <i className="bi bi-diagram-3" aria-hidden="true" />
-                    </div>
-                    <p className="card-text mt-2">
-                      Orchestration health, retries, and lineage.
-                    </p>
-                    <NavLink to="/pipelines" className="stretched-link" aria-label="Open Pipelines">
-                      Open
-                    </NavLink>
-                  </div>
-                </div>
+              <div className="col-sm-6 col-xl-3">
+                <StatusCard
+                  title="API Health"
+                  icon="bi-heart-pulse"
+                  status={health?.ok ? "Healthy" : "Offline"}
+                  tone={health?.ok ? "success" : "danger"}
+                  note={health?.time ? new Date(health.time).toLocaleString() : undefined}
+                />
               </div>
+              <div className="col-sm-6 col-xl-3">
+                <StatusCard
+                  title="Profile"
+                  icon="bi-person-check"
+                  status={displayName}
+                  tone="primary"
+                  note={user?.roles?.length ? user.roles.join(", ") : "—"}
+                />
+              </div>
+              <div className="col-sm-6 col-xl-3">
+                <StatusCard title="Pipelines (24h)" icon="bi-diagram-3" status="—" tone="secondary" />
+              </div>
+              <div className="col-sm-6 col-xl-3">
+                <StatusCard title="Connectors Down" icon="bi-plug" status="—" tone="secondary" />
+              </div>
+            </div>
+          </section>
 
-              <div className="col-sm-6 col-lg-4">
-                <div className="card h-100">
-                  <div className="card-body">
-                    <div className="d-flex align-items-center justify-content-between">
-                      <h6 className="card-title mb-0">Connectors</h6>
-                      <i className="bi bi-plug" aria-hidden="true" />
-                    </div>
-                    <p className="card-text mt-2">
-                      Device/API adapters and ETL collectors status.
-                    </p>
-                    <NavLink to="/connectors" className="stretched-link" aria-label="Open Connectors">
-                      Open
-                    </NavLink>
-                  </div>
-                </div>
-              </div>
-
-              <div className="col-sm-6 col-lg-4">
-                <div className="card h-100">
-                  <div className="card-body">
-                    <div className="d-flex align-items-center justify-content-between">
-                      <h6 className="card-title mb-0">Alerts</h6>
-                      <i className="bi bi-bell" aria-hidden="true" />
-                    </div>
-                    <p className="card-text mt-2">
-                      Active warnings and system notifications.
-                    </p>
-                    <NavLink to="/alerts" className="stretched-link" aria-label="Open Alerts">
-                      Open
-                    </NavLink>
-                  </div>
-                </div>
-              </div>
+          {/* Quick navigation tiles */}
+          <section aria-label="Quick navigation" className="mt-4">
+            <div className="row g-3">
+              <ActionCard
+                title="Pipelines"
+                icon="bi-diagram-3"
+                to="/pipelines"
+                copy="Orchestration health, retries, and lineage."
+              />
+              <ActionCard
+                title="Connectors"
+                icon="bi-plug"
+                to="/connectors"
+                copy="Device/API adapters and ETL collectors status."
+              />
+              <ActionCard
+                title="Alerts"
+                icon="bi-bell"
+                to="/alerts"
+                copy="Active warnings and system notifications."
+              />
             </div>
           </section>
 
@@ -216,26 +228,28 @@ const Home: React.FC<HomeProps> = ({ token }) => {
                     aria-label="Chart placeholder"
                   >
                     {/* TODO: Replace with Chart.js or Power BI embed */}
+                    <span className="text-secondary">Coming soon: KPIs from Azure SQL / Power BI.</span>
                   </div>
                 </div>
               </div>
 
               <div className="col-xl-5">
                 <div className="card h-100">
-                  <div className="card-header">Recent Activity</div>
+                  <div className="card-header d-flex align-items-center gap-2">
+                    <i className="bi bi-activity" aria-hidden="true" /> Recent Activity
+                  </div>
                   <div className="list-group list-group-flush">
-                    <div className="list-group-item bg-transparent">
-                      <i className="bi bi-arrow-repeat me-2 text-warning" aria-hidden="true" />
-                      ETL Collector “WasherLogs-01” retrying (2 of 5)
-                    </div>
-                    <div className="list-group-item bg-transparent">
-                      <i className="bi bi-plug me-2 text-danger" aria-hidden="true" />
-                      Connector “TDOC-AT” unreachable
-                    </div>
-                    <div className="list-group-item bg-transparent">
-                      <i className="bi bi-check2-circle me-2 text-success" aria-hidden="true" />
-                      Orchestration job “FinanceSync” succeeded
-                    </div>
+                    <ActivityItem
+                      icon="bi-arrow-repeat"
+                      tone="warning"
+                      text='ETL “WasherLogs-01” retrying (2 of 5)'
+                    />
+                    <ActivityItem icon="bi-plug" tone="danger" text='Connector “TDOC-AT” unreachable' />
+                    <ActivityItem
+                      icon="bi-check2-circle"
+                      tone="success"
+                      text='Orchestration job “FinanceSync” succeeded'
+                    />
                   </div>
                 </div>
               </div>
@@ -248,3 +262,79 @@ const Home: React.FC<HomeProps> = ({ token }) => {
 };
 
 export default Home;
+
+/* ----------------------- Local components ---------------------- */
+
+function StatusCard({
+  title,
+  icon,
+  status,
+  tone,
+  note,
+}: {
+  title: string;
+  icon: string;
+  status?: string;
+  tone?: "success" | "danger" | "primary" | "secondary";
+  note?: string;
+}) {
+  return (
+    <div className="card h-100">
+      <div className="card-body">
+        <div className="d-flex align-items-center justify-content-between">
+          <h6 className="card-title mb-0">{title}</h6>
+          <i className={`bi ${icon}`} aria-hidden="true" />
+        </div>
+        <p className="display-6 my-2">{status ?? "—"}</p>
+        {note && <p className="text-secondary mb-0">{note}</p>}
+        {tone && <span className={`badge bg-${tone} mt-2`}>{tone}</span>}
+      </div>
+    </div>
+  );
+}
+
+function ActionCard({
+  title,
+  icon,
+  to,
+  copy,
+}: {
+  title: string;
+  icon: string;
+  to: string;
+  copy: string;
+}) {
+  return (
+    <div className="col-sm-6 col-lg-4">
+      <div className="card h-100">
+        <div className="card-body">
+          <div className="d-flex align-items-center justify-content-between">
+            <h6 className="card-title mb-0">{title}</h6>
+            <i className={`bi ${icon}`} aria-hidden="true" />
+          </div>
+          <p className="card-text mt-2">{copy}</p>
+          <NavLink to={to} className="stretched-link" aria-label={`Open ${title}`}>
+            Open
+          </NavLink>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ActivityItem({
+  icon,
+  tone,
+  text,
+}: {
+  icon: string;
+  tone: "success" | "danger" | "warning" | "info";
+  text: string;
+}) {
+  return (
+    <div className="list-group-item bg-transparent">
+      <i className={`bi ${icon} me-2 text-${tone}`} aria-hidden="true" />
+      {text}
+    </div>
+  );
+}
