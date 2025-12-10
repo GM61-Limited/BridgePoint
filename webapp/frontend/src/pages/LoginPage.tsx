@@ -1,17 +1,28 @@
 
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../features/auth/AuthContext';
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const location = useLocation();
+  const { login, isAuthenticated } = useAuth();
+
+  // If a protected route sent us here, it stored the original URL in state.from
+  const from = (location.state as any)?.from?.pathname || '/';
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [msUnavailable, setMsUnavailable] = useState(false);
+
+  // Redirect after auth flips
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate(from, { replace: true });
+    }
+  }, [isAuthenticated, from, navigate]);
 
   async function handleLogin(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -27,12 +38,14 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await login(u, p);
-      navigate('/', { replace: true });
+      // no navigate here; the effect above will handle redirect
     } catch (err: any) {
       const status = err?.response?.status;
       const serverMsg =
         (err?.response?.data &&
-          (err.response.data.message || err.response.data.error)) ||
+          (err.response.data.message ||
+           err.response.data.error ||
+           err.response.data.detail)) ||
         undefined;
 
       if (status === 401) {
@@ -59,7 +72,7 @@ export default function LoginPage() {
       {/* Logo from /public/images */}
       <img
         src="/images/bridgepointAlt.png"
-        alt="GM61 Logo"
+        alt="BridgePoint"
         style={{ display: 'block', margin: '0 auto 20px', maxWidth: 150 }}
       />
 
@@ -132,7 +145,7 @@ export default function LoginPage() {
         >
           <img
             src="https://upload.wikimedia.org/wikipedia/commons/4/44/Microsoft_logo.svg"
-            alt="Microsoft Logo"
+            alt="Microsoft"
             style={{ width: 22, height: 22 }}
           />
           <span>Sign in with Microsoft</span>
@@ -141,7 +154,7 @@ export default function LoginPage() {
 
       <img
         src="/images/GM61Alt2.png"
-        alt="GM61 Logo"
+        alt="GM61"
         style={{ display: 'block', margin: '30px auto 20px', maxWidth: 175 }}
       />
     </div>
