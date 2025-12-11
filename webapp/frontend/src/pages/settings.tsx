@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../features/auth/AuthContext";
 
-/** --- API base (used for organization only, users/connections are placeholders) --- */
+/** --- API base (used for organization + users) --- */
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 /** --- Types --- */
@@ -33,21 +33,7 @@ export type ConnectionSummary = {
   lastUpdated?: string;
 };
 
-/** --- Placeholder data (keep users + connections local for now) --- */
-const PLACEHOLDER_ORG: Organization = {
-  id: "org-1",
-  name: "Your Organization",
-  domain: "example.org",
-  address: "123 Example Street, Example City",
-  timezone: "Europe/London",
-};
-
-const PLACEHOLDER_USERS: UserRow[] = [
-  { id: "u-1", name: "Nick LeMasonry",    email: "nick@example.org",    role: "admin",  active: true },
-  { id: "u-2", name: "Gill LeMasonry",    email: "gill@example.org",    role: "editor", active: true },
-  { id: "u-3", name: "Matthew LeMasonry", email: "matthew@example.org", role: "viewer", active: true },
-];
-
+/** --- Connections placeholder only (backend not built yet) --- */
 const PLACEHOLDER_SUMMARY: ConnectionSummary = {
   total: 5,
   active: 4,
@@ -71,6 +57,17 @@ async function safeErrMsg(res: Response) {
   }
 }
 
+/** Normalize server payloads to UserRow (tolerates is_active vs active, etc.) */
+function normalizeUserRow(u: any): UserRow {
+  return {
+    id: String(u.id),
+    name: String(u.name ?? ""),
+    email: String(u.email ?? ""),
+    role: (u.role as UserRow["role"]) ?? "viewer",
+    active: Boolean(u.active ?? u.is_active ?? true),
+  };
+}
+
 /** --- Settings page (renders inside Layout’s <Outlet/>) --- */
 export default function Settings() {
   const { token } = useAuth();
@@ -80,22 +77,25 @@ export default function Settings() {
 
   const [org, setOrg] = useState<Organization | null>(null);
   const [users, setUsers] = useState<UserRow[]>([]);
-  const [summary, setSummary] = useState<ConnectionSummary | null>(null);
 
   // Organization edit state
   const [orgEdit, setOrgEdit] = useState<OrgUpdate>({});
   const [orgSaving, setOrgSaving] = useState(false);
   const [orgEditing, setOrgEditing] = useState(false);
 
-  // Users edit state (local only)
+  // Users edit state
   const [userSaving, setUserSaving] = useState<string | null>(null);
   const [userAdding, setUserAdding] = useState(false);
+
+  // Connections (placeholder) — keep setter and update lastUpdated during bootstrap
+  const [summary, setSummary] = useState<ConnectionSummary | null>(PLACEHOLDER_SUMMARY);
 
   const headers = useMemo(() => authHeaders(token), [token]);
 
   /** Bootstrap:
-   * - Fetch Environement from backend (GET /environment)
-   * - Use placeholders for Users & Connections
+   * - Fetch Environment from backend (GET /environment)
+   * - Fetch Users from backend (GET /users)
+   * - Connections: keep placeholder and refresh lastUpdated
    */
   useEffect(() => {
     let cancelled = false;
@@ -104,36 +104,49 @@ export default function Settings() {
       setLoading(true);
       setError(null);
 
-      try {
-        // ---- Environement from backend ----
-        let orgData: Organization = PLACEHOLDER_ORG;
-        try {
-          const res = await fetch(`${API_BASE}/environment`, { headers });
-          if (res.ok) {
-            orgData = await res.json();
-          } else {
-            // Soft-fail to placeholder; surface message but don't block the page
-            const msg = await safeErrMsg(res);
-            console.warn("GET /environment failed:", msg);
-          }
-        } catch (e: any) {
-          console.warn("GET /environment error:", e?.message ?? e);
+      // Run environment + users in parallel; failures are independent
+      const envPromise = (async () => {
+        const res = await fetch(`${API_BASE}/environment`, { headers });
+        if (!res.ok) throw new Error(await safeErrMsg(res));
+        return (await res.json()) as Organization;
+      })();
+
+      const usersPromise = (async () => {
+        const res = await fetch(`${API_BASE}/users`, { headers });
+        if (!res.ok) throw new Error(await safeErrMsg(res));
+        const raw = await res.json();
+        return (Array.isArray(raw) ? raw : []).map(normalizeUserRow) as UserRow[];
+      })();
+
+      const [envOutcome, usersOutcome] = await Promise.allSettled([envPromise, usersPromise]);
+
+      if (!cancelled) {
+        // Environment
+        if (envOutcome.status === "fulfilled") {
+          setOrg(envOutcome.value);
+        } else {
+          console.warn("GET /environment failed:", envOutcome.reason?.message ?? envOutcome.reason);
+          setOrg(null);
+          setError((prev) => prev ?? "Failed to load organization.");
         }
 
-        // ---- Users + Connections from placeholders (no backend yet) ----
-        const usersData: UserRow[] = PLACEHOLDER_USERS;
-        const connData: ConnectionSummary = PLACEHOLDER_SUMMARY;
-
-        if (!cancelled) {
-          setOrg(orgData);
-          setUsers(usersData);
-          setSummary(connData);
-          setOrgEdit({});
+        // Users
+        if (usersOutcome.status === "fulfilled") {
+          setUsers(usersOutcome.value);
+        } else {
+          console.warn("GET /users failed:", usersOutcome.reason?.message ?? usersOutcome.reason);
+          setUsers([]);
+          setError((prev) => prev ?? "Failed to load users.");
         }
-      } catch (err: any) {
-        if (!cancelled) setError(err?.message ?? "Failed to load settings.");
-      } finally {
-        if (!cancelled) setLoading(false);
+
+        // Connections placeholder — refresh lastUpdated so setSummary is used
+        setSummary((prev) => {
+          const base = prev ?? PLACEHOLDER_SUMMARY;
+          return { ...base, lastUpdated: new Date().toISOString() };
+        });
+
+        setOrgEdit({});
+        setLoading(false);
       }
     }
 
@@ -165,38 +178,43 @@ export default function Settings() {
     setOrgSaving(true);
     setError(null);
     try {
-      // Try backend PATCH first
       const res = await fetch(`${API_BASE}/environment`, {
         method: "PATCH",
         headers,
         body: JSON.stringify(orgEdit),
       });
-      if (!res.ok) {
-        const msg = await safeErrMsg(res);
-        throw new Error(msg);
-      }
+      if (!res.ok) throw new Error(await safeErrMsg(res));
+
       const updated: Organization = await res.json();
       setOrg(updated);
       setOrgEditing(false);
       setOrgEdit({});
     } catch (err: any) {
-      // Fallback: optimistic local update if backend not ready
-      setOrg((prev) => (prev ? { ...prev, ...orgEdit } : prev));
-      setOrgEditing(false);
-      setOrgEdit({});
-      setError(err?.message ?? "Saved locally. Backend update not available yet.");
+      setError(err?.message ?? "Failed to update organization.");
     } finally {
       setOrgSaving(false);
     }
   }
 
-  /** --- Users editing (local only) --- */
+  /** --- Users: persist to backend --- */
   async function updateUser(row: UserRow) {
     setUserSaving(row.id);
     setError(null);
     try {
-      // Local update only
-      setUsers((prev) => prev.map((u) => (u.id === row.id ? row : u)));
+      const res = await fetch(`${API_BASE}/users/${encodeURIComponent(row.id)}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          name: row.name,
+          email: row.email,
+          role: row.role,
+          active: row.active,
+        }),
+      });
+      if (!res.ok) throw new Error(await safeErrMsg(res));
+
+      const updated: UserRow = normalizeUserRow(await res.json());
+      setUsers((prev) => prev.map((u) => (u.id === row.id ? updated : u)));
     } catch (err: any) {
       setError(err?.message ?? "Failed to update user.");
     } finally {
@@ -208,15 +226,22 @@ export default function Settings() {
     setUserAdding(true);
     setError(null);
     try {
-      // Local insertion only
-      const tempId = `u-${Date.now()}`;
-      const created: UserRow = {
-        id: tempId,
+      const payload = {
         name: "New User",
         email: `user${Date.now()}@${org?.domain ?? "example.org"}`,
-        role: "viewer",
+        role: "viewer" as UserRow["role"],
         active: true,
       };
+
+      const res = await fetch(`${API_BASE}/users`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) throw new Error(await safeErrMsg(res));
+
+      const created: UserRow = normalizeUserRow(await res.json());
       setUsers((prev) => [created, ...prev]);
     } catch (err: any) {
       setError(err?.message ?? "Failed to create user.");
@@ -259,7 +284,7 @@ export default function Settings() {
             <strong>Organization</strong>
           </div>
           {!orgEditing ? (
-            <button className="btn btn-sm btn-outline-primary" onClick={startOrgEdit}>
+            <button className="btn btn-sm btn-outline-primary" onClick={startOrgEdit} disabled={!org}>
               <i className="bi bi-pencil" aria-hidden="true" /> Edit
             </button>
           ) : (
@@ -319,7 +344,7 @@ export default function Settings() {
         </div>
       </div>
 
-      {/* Users card (placeholder/local) */}
+      {/* Users card (backend only) */}
       <div className="card mb-3">
         <div className="card-header d-flex align-items-center justify-content-between">
           <div className="d-flex align-items-center gap-2">
@@ -370,7 +395,7 @@ export default function Settings() {
         </div>
       </div>
 
-      {/* Connections summary (placeholder/local) */}
+      {/* Connections summary (placeholder only) */}
       <div className="card">
         <div className="card-header d-flex align-items-center gap-2">
           <i className="bi bi-plug" aria-hidden="true" />
@@ -397,7 +422,7 @@ export default function Settings() {
   );
 }
 
-/** --- Row editor component (users; local only) --- */
+/** --- Row editor component (users) --- */
 function UserRowEditor({
   row,
   saving,
