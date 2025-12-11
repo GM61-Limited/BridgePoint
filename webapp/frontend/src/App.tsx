@@ -10,9 +10,10 @@ import {
 } from "react-router-dom";
 import { AuthProvider, useAuth } from "./features/auth/AuthContext";
 
-import LoginPage from "./pages/LoginPage";
 import Home from "./pages/home";
 import Layout from "./pages/layout";
+import LoginPage from "./pages/LoginPage";
+import Settings from "./pages/settings"; // <-- NEW
 
 /**
  * Sync body class with the current route, but only after auth bootstrapping.
@@ -114,6 +115,9 @@ export default function App() {
 
             {/* Optional alias: users can still visit /home */}
             <Route path="home" element={<Home />} />
+
+            {/* NEW: Settings (protected) */}
+            <Route path="settings" element={<Settings />} />
 
             {/* Future protected pages (examples) */}
             {/* <Route path="pipelines" element={<Pipelines />} /> */}

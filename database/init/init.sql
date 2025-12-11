@@ -70,4 +70,5 @@ INSERT INTO environment (name, domain) VALUES
 INSERT INTO users (username, password_hash, first_name, last_name, environment_id, email, role) VALUES
 ('testuser', '$2b$12$h82fM8b1unYEkJg4KQQghui4.Rqpto5OVhX./tr3ZRQ4gZI6KYc8G', 'Test', 'User', 1, 'testuser@testcompany.com', 'Admin'),
 ('GM61', '$2b$12$h82fM8b1unYEkJg4KQQghui4.Rqpto5OVhX./tr3ZRQ4gZI6KYc8G', 'GM61', 'User', 2, 'gm61@gm61.co.uk', 'Admin'),
-('IHSS', '$2b$12$h82fM8b1unYEkJg4KQQghui4.Rqpto5OVhX./tr3ZRQ4gZI6KYc8G', 'IHSS', 'User', 3, 'ihss@ihss.co.uk', 'Admin');
+('IHSS', '$2b$12$h82fM8b1unYEkJg4KQQghui4.Rqpto5OVhX./tr3ZRQ4gZI6KYc8G', 'IHSS', 'User', 3, 'ihss@ihss.co.uk', 'Admin'),
+('nlemasonry', '$2b$12$h82fM8b1unYEkJg4KQQghui4.Rqpto5OVhX./tr3ZRQ4gZI6KYc8G', 'Nick', 'LeMasonry', 2, 'Nick.LeMasonry@GM61.co.uk', 'Admin');

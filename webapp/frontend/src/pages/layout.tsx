@@ -156,6 +156,17 @@ export default function Layout() {
             <i className="bi bi-bell me-2" aria-hidden="true" />
             <span className="sidebar-label">Alerts</span>
           </NavLink>
+
+          {/* NEW: Settings */}
+          <NavLink
+            to="/settings"
+            className={({ isActive }) =>
+              `nav-link d-flex align-items-center ${isActive ? "active" : ""}`
+            }
+          >
+            <i className="bi bi-gear me-2" aria-hidden="true" />
+            <span className="sidebar-label">Settings</span>
+          </NavLink>
         </nav>
 
         <div className="mt-auto px-3 py-3 border-top">

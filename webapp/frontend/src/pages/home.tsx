@@ -134,7 +134,7 @@ const Home: React.FC<HomeProps> = ({ token }) => {
           <div>
             <h1 className="h4 mb-1">Welcome, {displayName}</h1>
             <p className="mb-0 text-secondary">
-              Secure integration platform for sterile services—connect, orchestrate, and surface insights.
+              Secure integration platform for sterile services — connect, orchestrate, and surface insights.
             </p>
           </div>
           {env && (
