@@ -1,6 +1,9 @@
 
+# app/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import os
+
 from app.core.config import settings
 from app.api.v1.auth_routes import router as auth_router
 from app.api.v1.me_routes import router as me_router
@@ -19,9 +22,21 @@ app.add_middleware(
 
 # Health/hello
 @app.get("/health")
-def health(): return {"ok": True, "time": "up"}
+def health():
+    return {"ok": True, "time": "up"}
+
 @app.get("/hello")
-def hello_world(): return {"message": "Hello World From GM61 BridgePoint!"}
+def hello_world():
+    return {"message": "Hello World From GM61 BridgePoint!"}
+
+# Optional: App version metadata for Settings "About BridgePoint"
+@app.get("/version")
+def version():
+    return {
+        "version": os.getenv("APP_VERSION", "unknown"),
+        "commit": os.getenv("GIT_SHA"),
+        "buildTime": os.getenv("BUILD_TIME"),
+    }
 
 # API v1
 app.include_router(auth_router)
