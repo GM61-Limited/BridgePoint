@@ -104,5 +104,10 @@ VALUES
 ('testuser',  '$2b$12$h82fM8b1unYEkJg4KQQghui4.Rqpto5OVhX./tr3ZRQ4gZI6KYc8G', 'Test', 'User', 1, 'testuser@testcompany.com', 'Admin', TRUE),
 ('GM61',      '$2b$12$h82fM8b1unYEkJg4KQQghui4.Rqpto5OVhX./tr3ZRQ4gZI6KYc8G', 'GM61', 'User', 2, 'gm61@gm61.co.uk',         'Admin', TRUE),
 ('IHSS',      '$2b$12$h82fM8b1unYEkJg4KQQghui4.Rqpto5OVhX./tr3ZRQ4gZI6KYc8G', 'IHSS', 'User', 3, 'ihss@ihss.co.uk',          'Admin', TRUE),
-('nlemasonry','$2b$12$h82fM8b1unYEkJg4KQQghui4.Rqpto5OVhX./tr3ZRQ4gZI6KYc8G', 'Nick', 'LeMasonry', 2, 'Nick.LeMasonry@GM61.co.uk', 'Admin', TRUE)
+('nlemasonry','$2b$12$h82fM8b1unYEkJg4KQQghui4.Rqpto5OVhX./tr3ZRQ4gZI6KYc8G', 'Nick', 'LeMasonry', 2, 'Nick.LeMasonry@GM61.co.uk', 'Admin', TRUE),
+('mlm','$2b$12$h82fM8b1unYEkJg4KQQghui4.Rqpto5OVhX./tr3ZRQ4gZI6KYc8G', 'Matthew', 'LeMasonry', 2, 'Matthew.LeMasonry@GM61.co.uk', 'Viewer', TRUE),
+('Nick','$2b$12$h82fM8b1unYEkJg4KQQghui4.Rqpto5OVhX./tr3ZRQ4gZI6KYc8G', 'Nick', 'LeMasonry', 2, 'Nick@GM61.co.uk', 'Admin', TRUE),
+('GM61test','$2b$12$h82fM8b1unYEkJg4KQQghui4.Rqpto5OVhX./tr3ZRQ4gZI6KYc8G', 'GM61', 'Test', 2, 'gm61test@GM61.co.uk', 'Admin', TRUE),
+('Admin','$2b$12$h82fM8b1unYEkJg4KQQghui4.Rqpto5OVhX./tr3ZRQ4gZI6KYc8G', 'Admin', 'Admin', 2, 'Admin@GM61.co.uk', 'Admin', TRUE),
+('Dev','$2b$12$h82fM8b1unYEkJg4KQQghui4.Rqpto5OVhX./tr3ZRQ4gZI6KYc8G', 'Dev', 'Dev', 2, 'Dev@GM61.co.uk', 'Admin', TRUE)
 ON CONFLICT DO NOTHING;

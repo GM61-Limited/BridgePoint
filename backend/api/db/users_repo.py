@@ -1,3 +1,4 @@
+
 # app/db/users_repo.py
 """
 Tenant-scoped repository for Users.
@@ -24,6 +25,8 @@ Requires:
 from typing import Optional, Dict, Any, List, Tuple
 import json
 import datetime
+import secrets
+import string
 
 import psycopg2.extras
 from psycopg2 import errors
@@ -43,6 +46,18 @@ except Exception as e:
 # -------------------------
 def _dict_cur(conn):
     return conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+
+# -------------------------
+# Utility: temp password generator (NOT returned or logged)
+# -------------------------
+def _generate_temp_password(length: int = 20) -> str:
+    """
+    Generate a strong temporary password for accounts created without a provided password.
+    We do *not* return or log this plaintext; admins should immediately reset a real password.
+    """
+    alphabet = string.ascii_letters + string.digits + "-_@!#$%^&*"
+    return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
 # -------------------------
@@ -190,14 +205,14 @@ def create_user(
     is_active: bool = True,
 ) -> Dict[str, Any]:
     """
-    Create a user in an environment; hashes password if provided.
+    Create a user in an environment; *always* stores a non-NULL password_hash.
+    - If `password` is provided, hash it.
+    - If not provided or blank, generate a strong temporary password and hash that.
+      (We do NOT return/log the plaintext temp password.)
     Enforces per-tenant uniqueness via DB constraint.
     """
-    pw_hash = (
-        bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-        if password
-        else None
-    )
+    effective_password = password.strip() if (password and password.strip()) else _generate_temp_password()
+    pw_hash = bcrypt.hashpw(effective_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
     conn = get_db_connection()
     try:
@@ -214,9 +229,19 @@ def create_user(
         )
         row = cur.fetchone()
         conn.commit()
-        _log(environment_id=environment_id, user_id=row["id"], action="user.create", details={
-            "username": username, "email": email, "role": role, "first_name": first_name, "last_name": last_name
-        })
+        _log(
+            environment_id=environment_id,
+            user_id=row["id"],
+            action="user.create",
+            details={
+                "username": username,
+                "email": email,
+                "role": role,
+                "first_name": first_name,
+                "last_name": last_name,
+                "auto_temp_password": not (password and password.strip()),
+            },
+        )
         return dict(row)
     except errors.UniqueViolation:
         conn.rollback()
@@ -274,8 +299,12 @@ def update_user(
         row = cur.fetchone()
         if row:
             conn.commit()
-            _log(environment_id=environment_id, user_id=row["id"], action="user.update",
-                 details={k: updates[k] for k in updates if k in _ALLOWED_UPDATE_FIELDS})
+            _log(
+                environment_id=environment_id,
+                user_id=row["id"],
+                action="user.update",
+                details={k: updates[k] for k in updates if k in _ALLOWED_UPDATE_FIELDS},
+            )
             return dict(row)
         conn.rollback()
         return None

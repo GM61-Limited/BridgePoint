@@ -41,6 +41,23 @@ export type AppInfo = {
   buildTime?: string;
 };
 
+/** --- Modules (placeholder) --- */
+export type ModuleRow = {
+  key: string;
+  name: string;
+  description?: string;
+  enabled: boolean;
+};
+
+/** Initial placeholder modules; adjust as BridgePoint grows */
+const DEFAULT_MODULES: ModuleRow[] = [
+  { key: "sterile-services", name: "Sterile Services", description: "Core sterile services workflow.", enabled: true },
+  { key: "instruments",      name: "Instruments",      description: "Instrument-level tracking & reports.", enabled: true },
+  { key: "analytics",        name: "Analytics",        description: "Dashboards & performance insights.", enabled: true },
+  { key: "maintenance",      name: "Maintenance",      description: "Device maintenance scheduling.", enabled: false },
+  { key: "finance",          name: "Finance",          description: "Costing, billing & chargebacks.", enabled: false },
+];
+
 /** --- Connections placeholder only (backend not built yet) --- */
 const PLACEHOLDER_SUMMARY: ConnectionSummary = {
   total: 5,
@@ -146,6 +163,18 @@ function appInfoFromEnv(): AppInfo {
   return { version, commit, buildTime };
 }
 
+/** --- Deep compare for dirty detection --- */
+function rowsDiffer(a: UserRow, b: UserRow) {
+  return (
+    a.username !== b.username ||
+    a.firstName !== b.firstName ||
+    a.lastName !== b.lastName ||
+    a.email !== b.email ||
+    a.role !== b.role ||
+    a.active !== b.active
+  );
+}
+
 /** --- Settings page --- */
 export default function Settings() {
   const { token } = useAuth();
@@ -155,6 +184,8 @@ export default function Settings() {
 
   const [org, setOrg] = useState<Organization | null>(null);
   const [users, setUsers] = useState<UserRow[]>([]);
+  const [usersDraft, setUsersDraft] = useState<UserRow[]>([]);   // parent-level draft list
+  const [bulkSaving, setBulkSaving] = useState(false);           // disable inputs while bulk saving
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
 
   // Organization edit state
@@ -162,14 +193,46 @@ export default function Settings() {
   const [orgSaving, setOrgSaving] = useState(false);
   const [orgEditing, setOrgEditing] = useState(false);
 
-  // Users edit state
-  const [userSaving, setUserSaving] = useState<string | null>(null);
+  // Users edit/add state
+  const [userSaving, setUserSaving] = useState<string | null>(null);  // used for per-row operations (e.g., reset pw)
   const [userAdding, setUserAdding] = useState(false);
+
+  // Users pagination/show-more
+  const DEFAULT_VISIBLE = 5;
+  const [usersVisible, setUsersVisible] = useState<number>(DEFAULT_VISIBLE);
 
   // Connections (placeholder)
   const [summary, setSummary] = useState<ConnectionSummary | null>(PLACEHOLDER_SUMMARY);
 
+  // Modules (placeholder: persisted to localStorage per environment)
+  const [modules, setModules] = useState<ModuleRow[]>([]);           // current UI draft
+  const [modulesSaving, setModulesSaving] = useState(false);
+  const [modulesDirty, setModulesDirty] = useState(false);
+
   const baseHeaders = useMemo(() => authHeaders(token), [token]);
+
+  // --- Helpers: local persistence for modules until backend exists ---
+  function modulesStorageKey(envId: number | null) {
+    return envId == null ? "bridgepoint_modules:global" : `bridgepoint_modules:${envId}`;
+  }
+  function loadModulesFromStorage(envId: number | null): ModuleRow[] {
+    try {
+      const raw = localStorage.getItem(modulesStorageKey(envId));
+      if (!raw) return DEFAULT_MODULES;
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed as ModuleRow[];
+      return DEFAULT_MODULES;
+    } catch {
+      return DEFAULT_MODULES;
+    }
+  }
+  function saveModulesToStorage(envId: number | null, data: ModuleRow[]) {
+    try {
+      localStorage.setItem(modulesStorageKey(envId), JSON.stringify(data));
+    } catch {
+      /* ignore storage failures */
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -206,9 +269,9 @@ export default function Settings() {
               : Array.isArray((raw as any)?.users)
               ? (raw as any).users
               : [];
-            // Client-side safety filter until backend enforces tenant scoping
             const filtered = envId == null ? list : list.filter((u) => numericEnvId(u.environment_id) === envId);
-            return filtered.map(normalizeUserRow);
+            const normalized = filtered.map(normalizeUserRow);
+            return normalized;
           } catch (e: any) {
             console.warn("GET /users failed:", e?.message ?? e);
             setError((prev) => prev ?? "Failed to load users.");
@@ -237,6 +300,8 @@ export default function Settings() {
         if (!cancelled) {
           setOrg(orgData);
           setUsers(usersData);
+          setUsersDraft(usersData.map((u) => ({ ...u })));    // initialize draft to original
+          setUsersVisible(DEFAULT_VISIBLE);                    // reset visible to default on load
           setAppInfo(versionData);
 
           // Connections placeholder — refresh lastUpdated so setter is used
@@ -244,6 +309,10 @@ export default function Settings() {
             const base = prev ?? PLACEHOLDER_SUMMARY;
             return { ...base, lastUpdated: new Date().toISOString() };
           });
+
+          // Modules (placeholder) — load per environment from localStorage
+          setModules(loadModulesFromStorage(envId));
+          setModulesDirty(false);
 
           setOrgEdit({});
           setLoading(false);
@@ -258,9 +327,7 @@ export default function Settings() {
     }
 
     load();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [baseHeaders]);
 
   /** --- Organization editing --- */
@@ -274,12 +341,7 @@ export default function Settings() {
       timezone: org.timezone ?? "",
     });
   }
-
-  function cancelOrgEdit() {
-    setOrgEditing(false);
-    setOrgEdit({});
-  }
-
+  function cancelOrgEdit() { setOrgEditing(false); setOrgEdit({}); }
   async function saveOrgEdit() {
     if (!org) return;
     setOrgSaving(true);
@@ -302,7 +364,7 @@ export default function Settings() {
     }
   }
 
-  /** --- Users: persist to backend (username/first_name/last_name/email/role/is_active) --- */
+  /** --- Users: persist single row --- */
   async function updateUser(row: UserRow) {
     setUserSaving(row.id);
     setError(null);
@@ -325,7 +387,9 @@ export default function Settings() {
 
       const updatedBackend: BackendUser = await res.json();
       const updated = normalizeUserRow(updatedBackend);
+      // Update both original and draft lists
       setUsers((prev) => prev.map((u) => (u.id === row.id ? updated : u)));
+      setUsersDraft((prev) => prev.map((u) => (u.id === row.id ? { ...updated } : u)));
     } catch (err: any) {
       setError(err?.message ?? "Failed to update user.");
     } finally {
@@ -333,10 +397,11 @@ export default function Settings() {
     }
   }
 
-  /** --- Users: reset password --- */
+  /** --- Users: reset password (per-row) --- */
   async function resetPassword(userId: string, newPassword: string) {
     const envId = numericEnvId(org?.id);
     try {
+      setUserSaving(userId);
       const res = await fetch(`${API_BASE}/users/${encodeURIComponent(userId)}/reset-password`, {
         method: "POST",
         headers: withEnvHeader(baseHeaders, envId),
@@ -347,9 +412,12 @@ export default function Settings() {
     } catch (err: any) {
       setError(err?.message ?? "Failed to reset password.");
       return false;
+    } finally {
+      setUserSaving(null);
     }
   }
 
+  /** --- Users: add new user --- */
   async function addUser() {
     setUserAdding(true);
     setError(null);
@@ -361,7 +429,7 @@ export default function Settings() {
         headers: withEnvHeader(baseHeaders, envId),
         body: JSON.stringify({
           username: "new.user",
-          first_name: null,              // send null for optional fields (avoids EmailStr validation errors)
+          first_name: null,              // optional fields as null (avoids EmailStr validation errors)
           last_name: null,
           email: null,
           role: toBackendRole("viewer"),
@@ -373,11 +441,108 @@ export default function Settings() {
       const createdBackend: BackendUser = await res.json();
       const created = normalizeUserRow(createdBackend);
       setUsers((prev) => [created, ...prev]);
+      setUsersDraft((prev) => [{ ...created }, ...prev]);
+      // Keep visible count sensible after adding (ensure at least DEFAULT_VISIBLE)
+      setUsersVisible((v) => Math.max(v, DEFAULT_VISIBLE));
     } catch (err: any) {
       setError(err?.message ?? "Failed to create user.");
     } finally {
       setUserAdding(false);
     }
+  }
+
+  /** --- Users: global toolbar actions --- */
+  const hasUsersDirty = usersDraft.some((d) => {
+    const orig = users.find((u) => u.id === d.id);
+    return orig ? rowsDiffer(orig, d) : true;
+  });
+
+  function discardAllUserChanges() {
+    // Revert draft back to originals
+    setUsersDraft(users.map((u) => ({ ...u })));
+    setUsersVisible(DEFAULT_VISIBLE);
+  }
+
+  async function refreshUsersFromServer() {
+    const envId = numericEnvId(org?.id);
+    try {
+      const res = await fetch(`${API_BASE}/users`, { headers: withEnvHeader(baseHeaders, envId) });
+      if (!res.ok) throw new Error(await safeErrMsg(res));
+      const raw = await res.json();
+      const list: BackendUser[] = Array.isArray(raw)
+        ? (raw as any[])
+        : Array.isArray((raw as any)?.users)
+        ? (raw as any).users
+        : [];
+      const filtered = envId == null ? list : list.filter((u) => numericEnvId(u.environment_id) === envId);
+      const normalized = filtered.map(normalizeUserRow);
+      setUsers(normalized);
+      setUsersDraft(normalized.map((u) => ({ ...u })));
+      setUsersVisible(DEFAULT_VISIBLE);
+      setError(null);
+    } catch (err: any) {
+      setError(err?.message ?? "Failed to refresh users.");
+    }
+  }
+
+  async function saveAllUserChanges() {
+    setBulkSaving(true);
+    setError(null);
+    try {
+      // Save each changed row sequentially (clearer errors; change to Promise.all if you prefer)
+      for (const d of usersDraft) {
+        const orig = users.find((u) => u.id === d.id);
+        if (!orig || rowsDiffer(orig, d)) {
+          await updateUser(d);
+        }
+      }
+      // After saving, align drafts with the (updated) originals
+      setUsersDraft((prev) => prev.map((u) => ({ ...u })));
+    } catch (err: any) {
+      setError(err?.message ?? "Failed to save user changes.");
+    } finally {
+      setBulkSaving(false);
+    }
+  }
+
+  /** --- Modules (placeholder): toggle/save/reset --- */
+  function toggleModule(key: string, enabled: boolean) {
+    setModules((prev) => {
+      const next = prev.map((m) => (m.key === key ? { ...m, enabled } : m));
+      setModulesDirty(true);
+      return next;
+    });
+  }
+  function resetModulesToDefault() {
+    setModules(DEFAULT_MODULES);
+    setModulesDirty(true);
+  }
+  async function saveModules() {
+    setModulesSaving(true);
+    setError(null);
+    try {
+      const envId = numericEnvId(org?.id);
+      // Placeholder persistence (localStorage) until backend exists
+      saveModulesToStorage(envId, modules);
+      setModulesDirty(false);
+    } catch (err: any) {
+      setError(err?.message ?? "Failed to save modules.");
+    } finally {
+      setModulesSaving(false);
+    }
+  }
+
+  /** --- Derived: Users visibility --- */
+  const totalUsers = usersDraft.length;
+  const visibleUsers = usersDraft.slice(0, usersVisible);
+  const canShowMore = usersVisible < totalUsers;
+  const canShowLess = usersVisible > DEFAULT_VISIBLE;
+
+  function showMoreUsers(step = 5) {
+    setUsersVisible((v) => Math.min(v + step, totalUsers));
+  }
+  function showLessUsers() {
+    setUsersVisible(DEFAULT_VISIBLE);
   }
 
   /** --- Render --- */
@@ -514,51 +679,162 @@ export default function Settings() {
           <div className="d-flex align-items-center gap-2">
             <i className="bi bi-people" aria-hidden="true" />
             <strong>Users</strong>
+            <span className="ms-2 text-muted small">({Math.min(usersVisible, totalUsers)} of {totalUsers})</span>
           </div>
-          <button className="btn btn-sm btn-outline-primary" onClick={addUser} disabled={userAdding}>
-            {userAdding ? (
-              <>
-                <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true" />
-                Adding…
-              </>
-            ) : (
-              <>
-                <i className="bi bi-person-plus" aria-hidden="true" /> Add user
-              </>
-            )}
-          </button>
+          <div className="d-flex flex-wrap gap-2">
+            <button className="btn btn-sm btn-outline-secondary" onClick={refreshUsersFromServer} disabled={userAdding || bulkSaving}>
+              <i className="bi bi-arrow-clockwise" aria-hidden="true" /> Refresh
+            </button>
+            <button className="btn btn-sm btn-outline-secondary" onClick={discardAllUserChanges} disabled={!hasUsersDirty || bulkSaving}>
+              <i className="bi bi-arrow-counterclockwise" aria-hidden="true" /> Discard changes
+            </button>
+            <button className="btn btn-sm btn-primary" onClick={saveAllUserChanges} disabled={!hasUsersDirty || bulkSaving}>
+              {bulkSaving ? (
+                <>
+                  <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true" />
+                  Saving…
+                </>
+              ) : (
+                <>
+                  <i className="bi bi-check2" aria-hidden="true" /> Save changes
+                </>
+              )}
+            </button>
+            <button className="btn btn-sm btn-outline-primary" onClick={addUser} disabled={userAdding || bulkSaving}>
+              {userAdding ? (
+                <>
+                  <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true" />
+                  Adding…
+                </>
+              ) : (
+                <>
+                  <i className="bi bi-person-plus" aria-hidden="true" /> Add user
+                </>
+              )}
+            </button>
+          </div>
         </div>
         <div className="card-body" style={{ overflowX: "auto" }}>
-          {users.length === 0 ? (
+          {usersDraft.length === 0 ? (
             <div className="text-muted">No users found.</div>
           ) : (
-            <div className="table-responsive">
-              <table className="table align-middle" style={{ tableLayout: "fixed" }}>
-                <thead>
-                  <tr>
-                    <th style={{ width: "16%" }}>Username</th>
-                    <th style={{ width: "16%" }}>First name</th>
-                    <th style={{ width: "16%" }}>Last name</th>
-                    <th style={{ width: "20%" }}>Email</th>
-                    <th style={{ width: "12%" }}>Role</th>
-                    <th style={{ width: "8%"  }}>Active</th>
-                    <th style={{ width: "12%" }} className="text-end">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.map((u) => (
-                    <UserRowEditor
-                      key={u.id}
-                      row={u}
-                      saving={userSaving === u.id}
-                      onSave={updateUser}
-                      onResetPassword={resetPassword}
-                    />
-                  ))}
-                </tbody>
-              </table>
+            <>
+              <div className="table-responsive">
+                <table className="table align-middle" style={{ tableLayout: "fixed" }}>
+                  <thead>
+                    <tr>
+                      {/* New indicator column */}
+                      <th style={{ width: "2%" }} aria-label="Unsaved change indicator"></th>
+                      <th style={{ width: "16%" }}>Username</th>
+                      <th style={{ width: "16%" }}>First name</th>
+                      <th style={{ width: "16%" }}>Last name</th>
+                      <th style={{ width: "24%" }}>Email</th>
+                      <th style={{ width: "12%" }}>Role</th>
+                      <th style={{ width: "6%"  }} className="text-center">Active</th>
+                      <th style={{ width: "8%"  }} className="text-end">Actions</th> {/* Only Reset per row */}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleUsers.map((draftRow) => {
+                      const orig = users.find((u) => u.id === draftRow.id)!;
+                      const rowDirty = rowsDiffer(orig, draftRow);
+                      return (
+                        <UserRowEditor
+                          key={draftRow.id}
+                          draft={draftRow}
+                          onChange={(updated) =>
+                            setUsersDraft((prev) => prev.map((u) => (u.id === draftRow.id ? updated : u)))
+                          }
+                          saving={Boolean(userSaving) || bulkSaving}
+                          onResetPassword={resetPassword}
+                          rowDirty={rowDirty}
+                        />
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Show more / Show less controls (now blue like Add user) */}
+              <div className="d-flex justify-content-center gap-2 mt-2">
+                {canShowMore && (
+                  <button className="btn btn-sm btn-outline-primary" onClick={() => showMoreUsers(5)}>
+                    Show more
+                  </button>
+                )}
+                {canShowLess && (
+                  <button className="btn btn-sm btn-outline-primary" onClick={showLessUsers}>
+                    Show less
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Modules (placeholder) */}
+      <div className="card mb-3">
+        <div className="card-header d-flex align-items-center justify-content-between">
+          <div className="d-flex align-items-center gap-2">
+            <i className="bi bi-grid" aria-hidden="true" />
+            <strong>Modules</strong>
+          </div>
+          <div className="d-flex gap-2">
+            <button className="btn btn-sm btn-outline-secondary" onClick={resetModulesToDefault} disabled={modulesSaving}>
+              <i className="bi bi-arrow-counterclockwise" aria-hidden="true" /> Reset to defaults
+            </button>
+            <button
+              className="btn btn-sm btn-primary"
+              onClick={saveModules}
+              disabled={modulesSaving || !modulesDirty}
+              title="Save module configuration"
+            >
+              {modulesSaving ? (
+                <>
+                  <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true" />
+                  Saving…
+                </>
+              ) : (
+                <>
+                  <i className="bi bi-check2" aria-hidden="true" /> Save
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+        <div className="card-body">
+          {modules.length === 0 ? (
+            <div className="text-muted">No modules available.</div>
+          ) : (
+            <div className="row g-3">
+              {modules.map((m) => (
+                <div key={m.key} className="col-md-6">
+                  <div className="p-3 border rounded d-flex align-items-start justify-content-between">
+                    <div className="me-3">
+                      <div className="fw-semibold">{m.name}</div>
+                      {m.description ? <div className="text-muted small">{m.description}</div> : null}
+                    </div>
+                    <div className="form-check form-switch">
+                      <input
+                        className="form-check-input"
+                        type="checkbox"
+                        id={`mod-${m.key}`}
+                        checked={m.enabled}
+                        onChange={(e) => toggleModule(m.key, e.target.checked)}
+                      />
+                      <label className="form-check-label" htmlFor={`mod-${m.key}`}>
+                        {m.enabled ? "Enabled" : "Disabled"}
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
+          <div className="text-muted small mt-3">
+            Placeholder only — configuration is stored locally per environment until backend API is available.
+          </div>
         </div>
       </div>
 
@@ -591,33 +867,24 @@ export default function Settings() {
 
 /** --- Row editor component (users) --- */
 function UserRowEditor({
-  row,
+  draft,
+  onChange,
   saving,
-  onSave,
   onResetPassword,
+  rowDirty,
 }: {
-  row: UserRow;
+  draft: UserRow;
+  onChange: (row: UserRow) => void;
   saving: boolean;
-  onSave: (row: UserRow) => Promise<void>;
   onResetPassword: (userId: string, newPassword: string) => Promise<boolean>;
+  rowDirty: boolean;
 }) {
-  const [draft, setDraft] = useState<UserRow>(row);
   const [showReset, setShowReset] = useState(false);
   const [pw1, setPw1] = useState("");
   const [pw2, setPw2] = useState("");
   const [resetting, setResetting] = useState(false);
   const [resetErr, setResetErr] = useState<string | null>(null);
   const [resetOk, setResetOk] = useState<boolean>(false);
-
-  const dirty =
-    draft.username !== row.username ||
-    draft.firstName !== row.firstName ||
-    draft.lastName !== row.lastName ||
-    draft.email !== row.email ||
-    draft.role !== row.role ||
-    draft.active !== row.active;
-
-  useEffect(() => setDraft(row), [row]);
 
   async function handleConfirmReset() {
     setResetErr(null);
@@ -626,7 +893,7 @@ function UserRowEditor({
     if (pw1 !== pw2) { setResetErr("Passwords do not match."); return; }
 
     setResetting(true);
-    const ok = await onResetPassword(row.id, pw1);
+    const ok = await onResetPassword(draft.id, pw1);
     setResetting(false);
     if (ok) {
       setResetOk(true);
@@ -641,12 +908,23 @@ function UserRowEditor({
 
   return (
     <>
+      {/* Removed yellow highlight; add blue dot indicator in first cell when row is dirty */}
       <tr>
+        {/* Indicator cell */}
+        <td className="text-center" title={rowDirty ? "Unsaved changes" : ""} aria-label={rowDirty ? "Unsaved changes" : undefined}>
+          {rowDirty ? (
+            <span
+              className="d-inline-block rounded-circle bg-primary"
+              style={{ width: 8, height: 8 }}
+            />
+          ) : null}
+        </td>
+
         <td>
           <input
             className="form-control form-control-sm"
             value={draft.username}
-            onChange={(e) => setDraft((d) => ({ ...d, username: e.target.value }))}
+            onChange={(e) => onChange({ ...draft, username: e.target.value })}
             disabled={saving}
           />
         </td>
@@ -654,7 +932,7 @@ function UserRowEditor({
           <input
             className="form-control form-control-sm"
             value={draft.firstName}
-            onChange={(e) => setDraft((d) => ({ ...d, firstName: e.target.value }))}
+            onChange={(e) => onChange({ ...draft, firstName: e.target.value })}
             disabled={saving}
           />
         </td>
@@ -662,7 +940,7 @@ function UserRowEditor({
           <input
             className="form-control form-control-sm"
             value={draft.lastName}
-            onChange={(e) => setDraft((d) => ({ ...d, lastName: e.target.value }))}
+            onChange={(e) => onChange({ ...draft, lastName: e.target.value })}
             disabled={saving}
           />
         </td>
@@ -671,7 +949,7 @@ function UserRowEditor({
             className="form-control form-control-sm"
             type="email"
             value={draft.email}
-            onChange={(e) => setDraft((d) => ({ ...d, email: e.target.value }))}
+            onChange={(e) => onChange({ ...draft, email: e.target.value })}
             disabled={saving}
           />
         </td>
@@ -679,7 +957,7 @@ function UserRowEditor({
           <select
             className="form-select form-select-sm"
             value={draft.role}
-            onChange={(e) => setDraft((d) => ({ ...d, role: e.target.value as UserRow["role"] }))}
+            onChange={(e) => onChange({ ...draft, role: e.target.value as UserRow["role"] })}
             disabled={saving}
           >
             <option value="admin">Admin</option>
@@ -687,71 +965,44 @@ function UserRowEditor({
             <option value="viewer">Viewer</option>
           </select>
         </td>
-        <td>
-          <div className="form-check form-switch">
+
+        {/* Centered switch (no label; a11y via aria-label) */}
+        <td className="text-center">
+          <div className="form-check form-switch d-flex justify-content-center align-items-center m-0 p-0">
             <input
               className="form-check-input"
               type="checkbox"
               checked={draft.active}
-              onChange={(e) => setDraft((d) => ({ ...d, active: e.target.checked }))}
+              onChange={(e) => onChange({ ...draft, active: e.target.checked })}
               disabled={saving}
-              id={`active-${row.id}`}
+              id={`active-${draft.id}`}
+              aria-label={`Set ${draft.username} active`}
             />
-            <label className="form-check-label" htmlFor={`active-${row.id}`}>
-              {draft.active ? "Enabled" : "Disabled"}
-            </label>
           </div>
         </td>
 
-        {/* Actions: wider buttons that wrap if needed */}
+        {/* Actions: only Reset Password per row */}
         <td className="text-end">
-          <div className="d-flex justify-content-end flex-wrap gap-2">
-            <button
-              className="btn btn-outline-secondary"
-              onClick={() => setDraft(row)}
-              disabled={saving || !dirty}
-              title="Reset changes"
-            >
-              <i className="bi bi-arrow-counterclockwise" aria-hidden="true" />
-            </button>
-
-            <button
-              className="btn btn-outline-danger"
-              onClick={() => setShowReset(true)}
-              disabled={saving}
-              title="Reset password"
-            >
-              <i className="bi bi-key" aria-hidden="true" /> Reset
-            </button>
-
-            <button
-              className="btn btn-primary"
-              onClick={() => onSave(draft)}
-              disabled={saving || !dirty}
-              title="Save changes"
-            >
-              {saving ? (
-                <>
-                  <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true" />
-                  Saving…
-                </>
-              ) : (
-                <>
-                  <i className="bi bi-check2" aria-hidden="true" /> Save
-                </>
-              )}
-            </button>
-          </div>
+          <button
+            className="btn btn-sm btn-outline-danger"
+            onClick={() => setShowReset(true)}
+            disabled={saving}
+            title="Reset password"
+          >
+            <i className="bi bi-key" aria-hidden="true" /> Reset
+          </button>
         </td>
       </tr>
 
-      {/* Inline reset panel */}
+      {/* Inline reset panel (theme-aware) */}
       {showReset && (
         <tr>
-          <td colSpan={7}>
-            <div className="border rounded p-3 bg-light">
+          {/* Colspan matches header count (indicator + 7 columns = 8) */}
+          <td colSpan={8}>
+            {/* Use bg-body-tertiary so this adapts to dark/light themes */}
+            <div className="border rounded p-3 bg-body-tertiary">
               <div className="d-flex justify-content-between align-items-center mb-2">
-                <strong>Reset password for <code>{row.username}</code></strong>
+                <strong>Reset password for <code>{draft.username}</code></strong>
                 <button
                   type="button"
                   className="btn btn-sm btn-outline-secondary"
