@@ -16,8 +16,6 @@ services:
     build:
       context: ./backend
     container_name: BridgePointBackend
-    ports:
-      - "8000:8000"
     environment:
       DB_HOST: database
       DB_PORT: 5432
