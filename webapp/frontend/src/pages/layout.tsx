@@ -116,7 +116,7 @@ export default function Layout() {
         </div>
 
         <nav className="nav flex-column px-2 py-2" aria-label="Primary">
-          {/* Home (house icon) */}
+          {/* Home */}
           <NavLink
             to="/home"
             end
@@ -128,7 +128,7 @@ export default function Layout() {
             <span className="sidebar-label">Home</span>
           </NavLink>
 
-          {/* Pipelines (Under construction with original icon) */}
+          {/* Pipelines (Soon) */}
           <NavLink
             to="/pipelines"
             className={({ isActive }) =>
@@ -142,7 +142,7 @@ export default function Layout() {
             <span className="badge text-bg-warning ms-2">Soon</span>
           </NavLink>
 
-          {/* Connectors (Under construction with original icon) */}
+          {/* Connectors (LIVE — aligned, keep badge) */}
           <NavLink
             to="/connectors"
             className={({ isActive }) =>
@@ -153,10 +153,38 @@ export default function Layout() {
               <i className="bi bi-plug me-2" aria-hidden="true" />
               <span className="sidebar-label">Connectors</span>
             </span>
+            <span className="badge text-bg-primary ms-2">New</span>
+          </NavLink>
+
+          {/* Dashboards (Soon) */}
+          <NavLink
+            to="/dashboards"
+            className={({ isActive }) =>
+              `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
+            }
+          >
+            <span className="d-flex align-items-center">
+              <i className="bi bi-bar-chart-line me-2" aria-hidden="true" />
+              <span className="sidebar-label">Dashboards</span>
+            </span>
             <span className="badge text-bg-warning ms-2">Soon</span>
           </NavLink>
 
-          {/* Alerts (Under construction with original icon) */}
+          {/* Finance (Soon) */}
+          <NavLink
+            to="/finance"
+            className={({ isActive }) =>
+              `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
+            }
+          >
+            <span className="d-flex align-items-center">
+              <i className="bi bi-currency-pound me-2" aria-hidden="true" />
+              <span className="sidebar-label">Finance</span>
+            </span>
+            <span className="badge text-bg-warning ms-2">Soon</span>
+          </NavLink>
+
+          {/* Alerts (Soon) */}
           <NavLink
             to="/alerts"
             className={({ isActive }) =>
@@ -170,7 +198,7 @@ export default function Layout() {
             <span className="badge text-bg-warning ms-2">Soon</span>
           </NavLink>
 
-          {/* Washers (blue NEW badge) */}
+          {/* Washers (New) */}
           <NavLink
             to="/washers"
             className={({ isActive }) =>
@@ -222,7 +250,7 @@ export default function Layout() {
                 <i className="bi bi-bell" aria-hidden="true" /> <span className="sidebar-label">Notifications</span>
               </button>
 
-              {/* Single theme toggle button (sun/moon only) */}
+              {/* Theme toggle */}
               <button
                 type="button"
                 className={`btn btn-sm ${btnOutline}`}

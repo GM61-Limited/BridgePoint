@@ -15,7 +15,10 @@ import Layout from "./pages/layout";
 import LoginPage from "./pages/LoginPage";
 import ReprocessingMonitor from "./pages/ReprocessingMonitor"; // <-- washers/autoclaves/sterilisers module
 import Settings from "./pages/settings"; // <-- Settings
-import UnderConstruction from "./pages/UnderConstruction"; // <-- NEW: generic placeholder page
+import UnderConstruction from "./pages/UnderConstruction"; // <-- generic placeholder page
+
+// NEW: Connectors page (change to "./pages/Connectors" if you used uppercase filename)
+import Connectors from "./pages/connectors";
 
 /**
  * Sync body class with the current route, but only after auth bootstrapping.
@@ -126,7 +129,12 @@ export default function App() {
             {/* Convenience alias: /washers goes to the same view */}
             <Route path="washers" element={<ReprocessingMonitor />} />
 
-            {/* Under-construction routes */}
+            {/* NEW: Connectors (live) */}
+            <Route path="connectors" element={<Connectors />} />
+            {/* Optional alias for muscle memory */}
+            <Route path="integrations" element={<Navigate to="/connectors" replace />} />
+
+            {/* Under-construction routes (placeholders) */}
             <Route
               path="pipelines"
               element={
@@ -137,20 +145,33 @@ export default function App() {
               }
             />
             <Route
-              path="connectors"
-              element={
-                <UnderConstruction
-                  title="Connectors"
-                  description="Device and system connectors are being wired up."
-                />
-              }
-            />
-            <Route
               path="alerts"
               element={
                 <UnderConstruction
                   title="Alerts"
                   description="Real-time alerts and notifications are on the way."
+                />
+              }
+            />
+
+            {/* NEW: Dashboards (Soon) */}
+            <Route
+              path="dashboards"
+              element={
+                <UnderConstruction
+                  title="Dashboards"
+                  description="Operational and customer dashboards are coming soon."
+                />
+              }
+            />
+
+            {/* NEW: Finance (Soon) */}
+            <Route
+              path="finance"
+              element={
+                <UnderConstruction
+                  title="Finance"
+                  description="ERP integrations and billing orchestration are coming soon."
                 />
               }
             />
