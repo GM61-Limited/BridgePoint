@@ -109,5 +109,7 @@ VALUES
 ('Nick','$2b$12$h82fM8b1unYEkJg4KQQghui4.Rqpto5OVhX./tr3ZRQ4gZI6KYc8G', 'Nick', 'LeMasonry', 2, 'Nick@GM61.co.uk', 'Admin', TRUE),
 ('GM61test','$2b$12$h82fM8b1unYEkJg4KQQghui4.Rqpto5OVhX./tr3ZRQ4gZI6KYc8G', 'GM61', 'Test', 2, 'gm61test@GM61.co.uk', 'Admin', TRUE),
 ('Admin','$2b$12$h82fM8b1unYEkJg4KQQghui4.Rqpto5OVhX./tr3ZRQ4gZI6KYc8G', 'Admin', 'Admin', 2, 'Admin@GM61.co.uk', 'Admin', TRUE),
-('Dev','$2b$12$h82fM8b1unYEkJg4KQQghui4.Rqpto5OVhX./tr3ZRQ4gZI6KYc8G', 'Dev', 'Dev', 2, 'Dev@GM61.co.uk', 'Admin', TRUE)
+('Dev','$2b$12$h82fM8b1unYEkJg4KQQghui4.Rqpto5OVhX./tr3ZRQ4gZI6KYc8G', 'Dev', 'Dev', 2, 'Dev@GM61.co.uk', 'Admin', TRUE),
+('Jacob','$2b$12$h82fM8b1unYEkJg4KQQghui4.Rqpto5OVhX./tr3ZRQ4gZI6KYc8G', 'Jacob', 'Jones', 2, 'Jacob.Jones@GM61.co.uk', 'Admin', TRUE),
+('Gill','$2b$12$h82fM8b1unYEkJg4KQQghui4.Rqpto5OVhX./tr3ZRQ4gZI6KYc8G', 'Gill', 'LeMasonry', 2, 'Gill.LeMasonry@GM61.co.uk', 'Admin', TRUE)
 ON CONFLICT DO NOTHING;

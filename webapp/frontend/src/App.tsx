@@ -13,6 +13,7 @@ import { AuthProvider, useAuth } from "./features/auth/AuthContext";
 import Home from "./pages/home";
 import Layout from "./pages/layout";
 import LoginPage from "./pages/LoginPage";
+import ReprocessingMonitor from "./pages/ReprocessingMonitor"; // <-- ADD: washers/autoclaves/sterilisers module
 import Settings from "./pages/settings"; // <-- NEW
 
 /**
@@ -116,8 +117,13 @@ export default function App() {
             {/* Optional alias: users can still visit /home */}
             <Route path="home" element={<Home />} />
 
-            {/* NEW: Settings (protected) */}
+            {/* Settings (protected) */}
             <Route path="settings" element={<Settings />} />
+
+            {/* Reprocessing Monitor (washers/autoclaves/sterilisers) */}
+            <Route path="reprocessing" element={<ReprocessingMonitor />} />
+            {/* Convenience alias: /washers goes to the same view */}
+            <Route path="washers" element={<ReprocessingMonitor />} />
 
             {/* Future protected pages (examples) */}
             {/* <Route path="pipelines" element={<Pipelines />} /> */}

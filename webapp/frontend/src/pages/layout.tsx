@@ -116,6 +116,7 @@ export default function Layout() {
         </div>
 
         <nav className="nav flex-column px-2 py-2" aria-label="Primary">
+          {/* Home (house icon) */}
           <NavLink
             to="/home"
             end
@@ -123,7 +124,7 @@ export default function Layout() {
               `nav-link d-flex align-items-center ${isActive ? "active" : ""}`
             }
           >
-            <i className="bi bi-speedometer2 me-2" aria-hidden="true" />
+            <i className="bi bi-house-door me-2" aria-hidden="true" />
             <span className="sidebar-label">Home</span>
           </NavLink>
 
@@ -157,7 +158,19 @@ export default function Layout() {
             <span className="sidebar-label">Alerts</span>
           </NavLink>
 
-          {/* NEW: Settings */}
+          {/* Washers (washers/autoclaves/sterilisers module entry) */}
+          <NavLink
+            to="/washers"
+            className={({ isActive }) =>
+              `nav-link d-flex align-items-center ${isActive ? "active" : ""}`
+            }
+          >
+            {/* Use a widely available icon for maximum compatibility */}
+            <i className="bi bi-droplet me-2" aria-hidden="true" />
+            <span className="sidebar-label">Washers</span>
+          </NavLink>
+
+          {/* Settings */}
           <NavLink
             to="/settings"
             className={({ isActive }) =>
