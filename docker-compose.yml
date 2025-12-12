@@ -2,6 +2,8 @@ services:
   frontend:
     build:
       context: ./webapp
+      args:
+              API_BASE_URL: /api
     container_name: BridgePointWebServer
     ports:
       - "80:80"
