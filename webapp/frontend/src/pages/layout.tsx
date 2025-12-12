@@ -128,46 +128,60 @@ export default function Layout() {
             <span className="sidebar-label">Home</span>
           </NavLink>
 
+          {/* Pipelines (Under construction with original icon) */}
           <NavLink
             to="/pipelines"
             className={({ isActive }) =>
-              `nav-link d-flex align-items-center ${isActive ? "active" : ""}`
+              `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
             }
           >
-            <i className="bi bi-diagram-3 me-2" aria-hidden="true" />
-            <span className="sidebar-label">Pipelines</span>
+            <span className="d-flex align-items-center">
+              <i className="bi bi-diagram-3 me-2" aria-hidden="true" />
+              <span className="sidebar-label">Pipelines</span>
+            </span>
+            <span className="badge text-bg-warning ms-2">Soon</span>
           </NavLink>
 
+          {/* Connectors (Under construction with original icon) */}
           <NavLink
             to="/connectors"
             className={({ isActive }) =>
-              `nav-link d-flex align-items-center ${isActive ? "active" : ""}`
+              `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
             }
           >
-            <i className="bi bi-plug me-2" aria-hidden="true" />
-            <span className="sidebar-label">Connectors</span>
+            <span className="d-flex align-items-center">
+              <i className="bi bi-plug me-2" aria-hidden="true" />
+              <span className="sidebar-label">Connectors</span>
+            </span>
+            <span className="badge text-bg-warning ms-2">Soon</span>
           </NavLink>
 
+          {/* Alerts (Under construction with original icon) */}
           <NavLink
             to="/alerts"
             className={({ isActive }) =>
-              `nav-link d-flex align-items-center ${isActive ? "active" : ""}`
+              `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
             }
           >
-            <i className="bi bi-bell me-2" aria-hidden="true" />
-            <span className="sidebar-label">Alerts</span>
+            <span className="d-flex align-items-center">
+              <i className="bi bi-bell me-2" aria-hidden="true" />
+              <span className="sidebar-label">Alerts</span>
+            </span>
+            <span className="badge text-bg-warning ms-2">Soon</span>
           </NavLink>
 
-          {/* Washers (washers/autoclaves/sterilisers module entry) */}
+          {/* Washers (blue NEW badge) */}
           <NavLink
             to="/washers"
             className={({ isActive }) =>
-              `nav-link d-flex align-items-center ${isActive ? "active" : ""}`
+              `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
             }
           >
-            {/* Use a widely available icon for maximum compatibility */}
-            <i className="bi bi-droplet me-2" aria-hidden="true" />
-            <span className="sidebar-label">Washers</span>
+            <span className="d-flex align-items-center">
+              <i className="bi bi-droplet me-2" aria-hidden="true" />
+              <span className="sidebar-label">Washers</span>
+            </span>
+            <span className="badge text-bg-primary ms-2">New</span>
           </NavLink>
 
           {/* Settings */}

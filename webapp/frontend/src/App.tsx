@@ -13,8 +13,9 @@ import { AuthProvider, useAuth } from "./features/auth/AuthContext";
 import Home from "./pages/home";
 import Layout from "./pages/layout";
 import LoginPage from "./pages/LoginPage";
-import ReprocessingMonitor from "./pages/ReprocessingMonitor"; // <-- ADD: washers/autoclaves/sterilisers module
-import Settings from "./pages/settings"; // <-- NEW
+import ReprocessingMonitor from "./pages/ReprocessingMonitor"; // <-- washers/autoclaves/sterilisers module
+import Settings from "./pages/settings"; // <-- Settings
+import UnderConstruction from "./pages/UnderConstruction"; // <-- NEW: generic placeholder page
 
 /**
  * Sync body class with the current route, but only after auth bootstrapping.
@@ -120,15 +121,39 @@ export default function App() {
             {/* Settings (protected) */}
             <Route path="settings" element={<Settings />} />
 
-            {/* Reprocessing Monitor (washers/autoclaves/sterilisers) */}
+            {/* Washers / Reprocessing monitor */}
             <Route path="reprocessing" element={<ReprocessingMonitor />} />
             {/* Convenience alias: /washers goes to the same view */}
             <Route path="washers" element={<ReprocessingMonitor />} />
 
-            {/* Future protected pages (examples) */}
-            {/* <Route path="pipelines" element={<Pipelines />} /> */}
-            {/* <Route path="connectors" element={<Connectors />} /> */}
-            {/* <Route path="alerts" element={<Alerts />} /> */}
+            {/* Under-construction routes */}
+            <Route
+              path="pipelines"
+              element={
+                <UnderConstruction
+                  title="Pipelines"
+                  description="Data pipelines and orchestrations are coming soon."
+                />
+              }
+            />
+            <Route
+              path="connectors"
+              element={
+                <UnderConstruction
+                  title="Connectors"
+                  description="Device and system connectors are being wired up."
+                />
+              }
+            />
+            <Route
+              path="alerts"
+              element={
+                <UnderConstruction
+                  title="Alerts"
+                  description="Real-time alerts and notifications are on the way."
+                />
+              }
+            />
           </Route>
 
           {/* Catch-all → canonical root; ProtectedRoute will decide */}
