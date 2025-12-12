@@ -9,6 +9,8 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 /* ---------------------------- Types ---------------------------- */
 type MeResponse = {
   name: string;
+  first_name?: string | null; // <-- NEW
+  last_name?: string | null;  // <-- NEW
   roles: string[];
   environment_id: number;
 };
@@ -22,6 +24,15 @@ type EnvironmentResponse = {
 type HealthResponse = {
   ok: boolean;
   time?: string;
+};
+
+type WashersSummary = {
+  sites: number;
+  devices: number;
+  active: number;
+  running: number;
+  faults: number;
+  lastImport?: string;
 };
 
 interface HomeProps {
@@ -38,6 +49,24 @@ function getTokenFromStorage(): string | null {
   );
 }
 
+/* ----------------------- Name utilities ------------------------ */
+function firstNameFromFullName(full?: string | null): string {
+  const s = (full ?? "").trim();
+  if (!s) return "there";
+  // Handle common formats like "Last, First", "First Last", "First Middle Last"
+  if (s.includes(",")) {
+    // "Last, First [Middle]" => take the first part after comma
+    const parts = s.split(",").map((p) => p.trim()).filter(Boolean);
+    if (parts.length > 1) {
+      const given = parts[1].split(/\s+/)[0];
+      return given || "there";
+    }
+  }
+  // Default: first token
+  const given = s.split(/\s+/)[0];
+  return given || "there";
+}
+
 /* -------------------------- Component -------------------------- */
 const Home: React.FC<HomeProps> = ({ token }) => {
   const navigate = useNavigate();
@@ -45,6 +74,8 @@ const Home: React.FC<HomeProps> = ({ token }) => {
   const [user, setUser] = React.useState<MeResponse | null>(null);
   const [env, setEnv] = React.useState<EnvironmentResponse | null>(null);
   const [health, setHealth] = React.useState<HealthResponse | null>(null);
+  const [washers, setWashers] = React.useState<WashersSummary | null>(null);
+
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -104,6 +135,20 @@ const Home: React.FC<HomeProps> = ({ token }) => {
           const healthData: HealthResponse = await healthRes.json();
           setHealth(healthData);
         }
+
+        // ---- Washer integrations (placeholder for now)
+        // In future, replace this with a real endpoint like:
+        // const washersRes = await fetch(`${API_BASE}/devices/reprocessing/summary`, { headers });
+        // const washersData: WashersSummary = await washersRes.json();
+        // setWashers(washersData);
+        setWashers({
+          sites: 3,
+          devices: 7,
+          active: 6,
+          running: 3,
+          faults: 1,
+          lastImport: new Date().toISOString(),
+        });
       } catch (e: any) {
         if (e?.name !== "AbortError") {
           setError(e?.message ?? "Something went wrong");
@@ -117,7 +162,9 @@ const Home: React.FC<HomeProps> = ({ token }) => {
     return () => abort.abort();
   }, [token, navigate]);
 
-  const displayName = user?.name?.trim() ? user.name : "there";
+  // Prefer first_name when provided; else fall back to first token from 'name'
+  const firstName =
+    (user?.first_name && user.first_name.trim()) || firstNameFromFullName(user?.name);
 
   return (
     <div className="home-v2 container-fluid">
@@ -132,9 +179,11 @@ const Home: React.FC<HomeProps> = ({ token }) => {
             style={{ width: 48, height: 48 }}
           />
           <div>
-            <h1 className="h4 mb-1">Welcome, {displayName}</h1>
+            {/* Welcome with first name */}
+            <h1 className="h4 mb-1">Welcome, {firstName}</h1>
             <p className="mb-0 text-secondary">
-              Secure integration platform for sterile services — connect, orchestrate, and surface insights.
+              Secure integration platform for sterile services — connect,
+              orchestrate, and surface insights.
             </p>
           </div>
           {env && (
@@ -178,7 +227,7 @@ const Home: React.FC<HomeProps> = ({ token }) => {
                 <StatusCard
                   title="Profile"
                   icon="bi-person-check"
-                  status={displayName}
+                  status={firstName}
                   tone="primary"
                   note={user?.roles?.length ? user.roles.join(", ") : "—"}
                 />
@@ -188,6 +237,51 @@ const Home: React.FC<HomeProps> = ({ token }) => {
               </div>
               <div className="col-sm-6 col-xl-3">
                 <StatusCard title="Connectors Down" icon="bi-plug" status="—" tone="secondary" />
+              </div>
+            </div>
+          </section>
+
+          {/* Washer Integrations — placeholder summary */}
+          <section className="mt-4" aria-label="Washer integrations">
+            <div className="card">
+              <div className="card-header d-flex align-items-center justify-content-between">
+                <div className="d-flex align-items-center gap-2">
+                  <i className="bi bi-droplet" aria-hidden="true" />
+                  <strong>Washer Integrations</strong>
+                </div>
+                <div className="d-flex align-items-center gap-2">
+                  {washers?.lastImport && (
+                    <span className="text-muted small">
+                      Last import: {new Date(washers.lastImport).toLocaleString()}
+                    </span>
+                  )}
+                  <NavLink to="/washers" className="btn btn-sm btn-outline-primary">
+                    <i className="bi bi-arrow-right" aria-hidden="true" /> Open Washers
+                  </NavLink>
+                </div>
+              </div>
+              <div className="card-body">
+                {!washers ? (
+                  <div className="text-muted">No washer data available.</div>
+                ) : (
+                  <div className="row g-3">
+                    <div className="col-sm-6 col-lg-3">
+                      <StatusCard title="Sites" icon="bi-building" status={String(washers.sites)} tone="secondary" />
+                    </div>
+                    <div className="col-sm-6 col-lg-3">
+                      <StatusCard title="Devices" icon="bi-hdd-stack" status={String(washers.devices)} tone="secondary" />
+                    </div>
+                    <div className="col-sm-6 col-lg-3">
+                      <StatusCard title="Active" icon="bi-check-circle" status={String(washers.active)} tone="success" />
+                    </div>
+                    <div className="col-sm-6 col-lg-3">
+                      <StatusCard title="Running" icon="bi-play-fill" status={String(washers.running)} tone="primary" />
+                    </div>
+                    <div className="col-sm-6 col-lg-3">
+                      <StatusCard title="Faults" icon="bi-x-octagon" status={String(washers.faults)} tone="danger" />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </section>
