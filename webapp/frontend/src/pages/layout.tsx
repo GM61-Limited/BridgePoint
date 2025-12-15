@@ -139,7 +139,7 @@ export default function Layout() {
               <i className="bi bi-diagram-3 me-2" aria-hidden="true" />
               <span className="sidebar-label">Pipelines</span>
             </span>
-            <span className="badge text-bg-warning ms-2">Soon</span>
+            
           </NavLink>
 
           {/* Connectors (LIVE — aligned, keep badge) */}
@@ -167,7 +167,7 @@ export default function Layout() {
               <i className="bi bi-bar-chart-line me-2" aria-hidden="true" />
               <span className="sidebar-label">Dashboards</span>
             </span>
-            <span className="badge text-bg-warning ms-2">Soon</span>
+            
           </NavLink>
 
           {/* Finance (Soon) */}
@@ -181,7 +181,7 @@ export default function Layout() {
               <i className="bi bi-currency-pound me-2" aria-hidden="true" />
               <span className="sidebar-label">Finance</span>
             </span>
-            <span className="badge text-bg-warning ms-2">Soon</span>
+            
           </NavLink>
 
           {/* Alerts (Soon) */}
@@ -195,7 +195,7 @@ export default function Layout() {
               <i className="bi bi-bell me-2" aria-hidden="true" />
               <span className="sidebar-label">Alerts</span>
             </span>
-            <span className="badge text-bg-warning ms-2">Soon</span>
+            
           </NavLink>
 
           {/* Washers (New) */}
