@@ -13,23 +13,31 @@ import { AuthProvider, useAuth } from "./features/auth/AuthContext";
 import Home from "./pages/home";
 import Layout from "./pages/layout";
 import LoginPage from "./pages/LoginPage";
-import ReprocessingMonitor from "./pages/ReprocessingMonitor"; // <-- washers/autoclaves/sterilisers module
-import Settings from "./pages/settings"; // <-- Settings
-import UnderConstruction from "./pages/UnderConstruction"; // <-- generic placeholder page
+import Settings from "./pages/settings";
+import UnderConstruction from "./pages/UnderConstruction";
 
-// NEW: Connectors page (change to "./pages/Connectors" if you used uppercase filename)
+// Washers module pages
+import DeviceDetail from "./pages/DeviceDetail";
+import UploadCycle from "./pages/UploadCycle";
+import WashCycles from "./pages/WashCycles";
+import WashersOverview from "./pages/WashersOverview";
+
+// Connectors
 import Connectors from "./pages/connectors";
 
-/**
- * Sync body class with the current route, but only after auth bootstrapping.
- * This avoids background/style flicker during initialisation.
- */
+// Pipelines
+import Pipelines from "./pages/pipelines";
+
+// ⭐ NEW — Real Dashboards page
+import Dashboards from "./pages/dashboards";
+
+
 function BodyClassSync() {
   const { pathname } = useLocation();
   const { bootstrapping } = useAuth();
 
   useEffect(() => {
-    if (bootstrapping) return; // don't toggle while we don't know auth
+    if (bootstrapping) return;
 
     const isLogin = pathname === "/login";
     document.body.classList.toggle("login-view", isLogin);
@@ -43,48 +51,29 @@ function BodyClassSync() {
   return null;
 }
 
-/** Simple full-page spinner shown while auth bootstraps */
 function FullPageSpinner() {
   return (
     <div
       className="d-flex align-items-center justify-content-center"
       style={{ minHeight: "100vh" }}
     >
-      <div
-        className="spinner-border text-light"
-        role="status"
-        aria-label="Loading"
-      />
+      <div className="spinner-border text-primary" role="status" />
     </div>
   );
 }
 
-/**
- * Guard: only allow access when authenticated; otherwise, send to /login.
- * Uses `replace` to prevent the back button returning to login after success.
- */
 function ProtectedRoute({ children }: { children?: ReactNode }) {
   const location = useLocation();
   const { isAuthenticated, bootstrapping } = useAuth();
-
   if (bootstrapping) return <FullPageSpinner />;
-
-  return isAuthenticated ? (
-    <>{children}</>
-  ) : (
-    <Navigate to="/login" replace state={{ from: location }} />
-  );
+  return isAuthenticated
+    ? <>{children}</>
+    : <Navigate to="/login" replace state={{ from: location }} />;
 }
 
-/**
- * Guard: if already authenticated, don’t show the login page—go to the app.
- * Uses `replace` so login isn’t left in history.
- */
 function AnonOnlyRoute({ children }: { children?: ReactNode }) {
   const { isAuthenticated, bootstrapping } = useAuth();
-
   if (bootstrapping) return <FullPageSpinner />;
-
   return isAuthenticated ? <Navigate to="/" replace /> : <>{children}</>;
 }
 
@@ -92,11 +81,10 @@ export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
-        {/* Route-aware body class switcher, gated by bootstrapping */}
         <BodyClassSync />
-
         <Routes>
-          {/* LOGIN (standalone, not wrapped by Layout) */}
+
+          {/* Login */}
           <Route
             path="/login"
             element={
@@ -106,7 +94,7 @@ export default function App() {
             }
           />
 
-          {/* APP SHELL (Layout wraps only authenticated pages) */}
+          {/* App */}
           <Route
             path="/"
             element={
@@ -115,35 +103,32 @@ export default function App() {
               </ProtectedRoute>
             }
           >
-            {/* Render Home at the shell index to avoid an extra redirect */}
             <Route index element={<Home />} />
-
-            {/* Optional alias: users can still visit /home */}
             <Route path="home" element={<Home />} />
 
-            {/* Settings (protected) */}
             <Route path="settings" element={<Settings />} />
 
-            {/* Washers / Reprocessing monitor */}
-            <Route path="reprocessing" element={<ReprocessingMonitor />} />
-            {/* Convenience alias: /washers goes to the same view */}
-            <Route path="washers" element={<ReprocessingMonitor />} />
+            {/* Washers */}
+            <Route path="washers" element={<WashersOverview />} />
+            <Route path="reprocessing" element={<WashersOverview />} />
+            <Route path="devices/:deviceId" element={<DeviceDetail />} />
 
-            {/* NEW: Connectors (live) */}
+            {/* Cycles */}
+            <Route path="wash-cycles" element={<WashCycles />} />
+            <Route path="wash-cycles/upload" element={<UploadCycle />} />
+
+            {/* Connectors */}
             <Route path="connectors" element={<Connectors />} />
-            {/* Optional alias for muscle memory */}
             <Route path="integrations" element={<Navigate to="/connectors" replace />} />
 
-            {/* Under-construction routes (placeholders) */}
-            <Route
-              path="pipelines"
-              element={
-                <UnderConstruction
-                  title="Pipelines"
-                  description="Data pipelines and orchestrations are coming soon."
-                />
-              }
-            />
+            {/* Pipelines */}
+            <Route path="pipelines" element={<Pipelines />} />
+            <Route path="workflows" element={<Navigate to="/pipelines" replace />} />
+
+            {/* ⭐ Real Dashboards page */}
+            <Route path="dashboards" element={<Dashboards />} />
+
+            {/* Other placeholders */}
             <Route
               path="alerts"
               element={
@@ -153,19 +138,6 @@ export default function App() {
                 />
               }
             />
-
-            {/* NEW: Dashboards (Soon) */}
-            <Route
-              path="dashboards"
-              element={
-                <UnderConstruction
-                  title="Dashboards"
-                  description="Operational and customer dashboards are coming soon."
-                />
-              }
-            />
-
-            {/* NEW: Finance (Soon) */}
             <Route
               path="finance"
               element={
@@ -177,7 +149,7 @@ export default function App() {
             />
           </Route>
 
-          {/* Catch-all → canonical root; ProtectedRoute will decide */}
+          {/* Catch-all */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>

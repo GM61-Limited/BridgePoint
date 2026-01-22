@@ -96,8 +96,6 @@ ON CONFLICT DO NOTHING;
 
 -- =========================================
 -- Seed initial users (bcrypt hashes are placeholders)
--- Note: ensure password_hash uses the same hash algorithm your app expects.
--- The example values are the same as you shared; keep or replace as needed.
 -- =========================================
 INSERT INTO users (username, password_hash, first_name, last_name, environment_id, email, role, is_active)
 VALUES
@@ -113,3 +111,37 @@ VALUES
 ('Jacob','$2b$12$h82fM8b1unYEkJg4KQQghui4.Rqpto5OVhX./tr3ZRQ4gZI6KYc8G', 'Jacob', 'Jones', 2, 'Jacob.Jones@GM61.co.uk', 'Admin', TRUE),
 ('Gill','$2b$12$h82fM8b1unYEkJg4KQQghui4.Rqpto5OVhX./tr3ZRQ4gZI6KYc8G', 'Gill', 'LeMasonry', 2, 'Gill.LeMasonry@GM61.co.uk', 'Admin', TRUE)
 ON CONFLICT DO NOTHING;
+
+-- =========================================
+-- Seed demo PostgreSQL connection for environment_id = 2
+-- =========================================
+INSERT INTO sql_connections (
+    environment_id,
+    created_at,
+    name,
+    host,
+    database_name,
+    port,
+    table_name,
+    username,
+    password
+)
+SELECT
+    2,                      -- environment_id = 2 (GM61 Limited)
+    NOW(),
+    'Assure Test',          -- friendly name
+    '4.250.37.33',          -- host/IP
+    'postgres',             -- database name
+    5432,                   -- port
+    NULL,                   -- table name (optional)
+    'GM61',                 -- username
+    'Expert0.'              -- password (plaintext for now)
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM sql_connections sc
+    WHERE sc.environment_id = 2
+      AND sc.name = 'Assure Test'
+      AND sc.host = '4.250.37.33'
+      AND sc.port = 5432
+      AND sc.database_name = 'postgres'
+);

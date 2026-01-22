@@ -121,3 +121,40 @@ export async function getOverview() {
   const { data } = await api.get('/overview');
   return data;
 }
+
+
+// ---------- SQL Connections (list/test/query) ----------
+
+export type SqlConnection = {
+  id: number;
+  environment_id: number;
+  name: string;
+  host: string;
+  database_name: string;
+  port: number;
+  table_name?: string | null;
+  username: string;
+  created_at: string;
+};
+
+export async function listSqlConnections(envId: number) {
+  const { data } = await api.get<SqlConnection[]>(`/v1/sql-connections`, {
+    params: { envId }, // backend route is /api/v1/sql-connections?envId=2
+  });
+  return data;
+}
+
+export async function testSqlConnection(id: number) {
+  const { data } = await api.post<{ id: number; ok: boolean; error?: string }>(
+    `/v1/sql-connections/${id}/test`
+  );
+  return data;
+}
+
+export async function runSqlSelect<T = any>(id: number, sql: string, params: any[] = []) {
+  const { data } = await api.post<{ rows: T[]; count: number }>(
+    `/v1/sql-connections/${id}/query`,
+    { sql, params }
+  );
+  return data;
+}

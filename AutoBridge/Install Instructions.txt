@@ -1,0 +1,36 @@
+
+Installation guide for GM61 AutoBridge
+
+Developed by GM61 Limited
+
+www.gm61.co.uk
+
+
+
+
+
+Instructions to install AutoBridge
+
+1. Copy the otp folder into the C: drive.
+
+2. Navigate to otp > AutoBridge > .env (You may need to select the option to view hidden files)
+
+3. Configure your .env file. Your GM61 consultant should provide you with the correct configurations for your use case.
+
+4. Open Command Prompt as admin and run the following commands: 
+cd C:\otp\nssm\win64
+nssm install AutoBridge
+
+5. This should now open the nssm service configurator.
+
+6. In the path enter the following:
+C:\otp\AutoBridge\GM61-AutoBridge.exe
+
+7. You can now click "Install Service"
+
+8. Run the following command in PowerShell:
+net start AutoBridge
+
+
+
+Any queries regarding the installation, please contact: contact_us@gm61.co.uk

@@ -1,6 +1,7 @@
 
 // src/pages/connectors.tsx
 import { useEffect, useMemo, useRef, useState } from "react";
+import { api, listSqlConnections, runSqlSelect, testSqlConnection } from "../lib/api";
 
 /* =========================================================================
    Types
@@ -44,24 +45,19 @@ type DbConnector = BaseConnector & {
   dbName?: string;
   userMasked?: string;     // "svc_bridgepoint"
   ssl?: boolean;
+  // backend id for sql_connections (if present, use live endpoints)
+  sqlId?: number;
 };
 
 type AnyConnector = ApiConnector | DbConnector;
 
 /* =========================================================================
-   Helpers
+   Helpers & allowed provider lists
    ========================================================================= */
 const nowIso = () => new Date().toISOString();
 const inMinutes = (mins: number) => new Date(Date.now() + mins * 60_000).toISOString();
 const fmtTime = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : "—");
 
-// REMOVED: randChoice (unused) to satisfy TS6133 noUnusedLocals
-function maskTail(s?: string, tail = 4) {
-  if (!s) return "";
-  return "•".repeat(Math.max(0, s.length - tail)) + s.slice(-tail);
-}
-
-/** Theme-friendly status chip */
 function statusChip(status: Status) {
   const map: Record<Status, { text: string; className: string; icon: string }> = {
     connected:   { text: "Connected",   className: "text-success", icon: "bi-check-circle" },
@@ -72,204 +68,67 @@ function statusChip(status: Status) {
   return map[status];
 }
 
-/* =========================================================================
-   Seed (placeholder) data
-   Place your logos at: /public/images/{assure|tdoc|healthedge|intacct|xero}.png
-   ========================================================================= */
-function seedConnectors(): AnyConnector[] {
-  const base: AnyConnector[] = [
-    {
-      id: "api-assure",
-      name: "Assure",
-      category: "api",
-      provider: "Assure",
-      env: "Prod",
-      enabled: true,
-      status: "connected",
-      baseUrl: "https://assure.example/api",
-      authType: "apiKey",
-      maskedKey: maskTail("ASSURE_DEMO_KEY_123456"),
-      lastSyncAt: inMinutes(-8),
-      nextSyncAt: inMinutes(7),
-      notes: "Track & Trace connector (cycles, trays, events).",
-      logoUrl: "/images/assure.png",
-    },
-    {
-      id: "api-tdoc",
-      name: "T-DOC",
-      category: "api",
-      provider: "TDOC",
-      env: "Test",
-      enabled: true,
-      status: "connecting",
-      baseUrl: "https://tdoc.example/api",
-      authType: "basic",
-      maskedKey: maskTail("svc_tdoc:********"),
-      lastSyncAt: inMinutes(-60),
-      nextSyncAt: inMinutes(15),
-      notes: "Master data import + steriliser graphs when provided.",
-      logoUrl: "/images/tdoc.png",
-    },
-    {
-      id: "api-he",
-      name: "HealthEdge",
-      category: "api",
-      provider: "HealthEdge",
-      env: "Prod",
-      enabled: true,
-      status: "connected",
-      baseUrl: "https://healthedge.example/api",
-      authType: "custom",
-      maskedKey: maskTail("he_token_ABCDEF1234"),
-      lastSyncAt: inMinutes(-12),
-      nextSyncAt: inMinutes(3),
-      notes: "Throughput & priority feeds (Padawan pipeline).",
-      logoUrl: "/images/healthedge.png",
-    },
-    {
-      id: "api-intacct",
-      name: "Sage Intacct",
-      category: "api",
-      provider: "Sage Intacct",
-      env: "Prod",
-      enabled: true,
-      status: "connected",
-      baseUrl: "https://api.intacct.com/ia/api",
-      authType: "oauth2",
-      maskedKey: maskTail("si_client_secret_demo"),
-      lastSyncAt: inMinutes(-30),
-      nextSyncAt: inMinutes(30),
-      notes: "AR Invoices; activity-to-invoice orchestration.",
-      logoUrl: "/images/intacct.png",
-    },
-    {
-      id: "api-xero",
-      name: "Xero",
-      category: "api",
-      provider: "Xero",
-      env: "Test",
-      enabled: false,
-      status: "disconnected",
-      baseUrl: "https://api.xero.com",
-      authType: "oauth2",
-      maskedKey: maskTail("xero_client_secret"),
-      lastSyncAt: null,
-      nextSyncAt: null,
-      notes: "Optional alternative ERP pathway.",
-      logoUrl: "/images/xero.png",
-    },
-    // Databases
-    {
-      id: "db-pg",
-      name: "PostgreSQL",
-      category: "database",
-      provider: "PostgreSQL",
-      env: "Prod",
-      enabled: true,
-      status: "connected",
-      host: "pg.bridgepoint.local",
-      port: 5432,
-      dbName: "bridgepoint",
-      userMasked: "svc_bridgepoint",
-      ssl: true,
-      lastSyncAt: inMinutes(-5),
-      nextSyncAt: inMinutes(5),
-      notes: "Primary operational store (containers).",
-      logoUrl: "/images/postgres.png",
-    },
-    {
-      id: "db-mysql",
-      name: "MySQL",
-      category: "database",
-      provider: "MySQL",
-      env: "Test",
-      enabled: true,
-      status: "disconnected",
-      host: "mysql.lab.local",
-      port: 3306,
-      dbName: "assure_compat",
-      userMasked: "svc_mysql",
-      ssl: false,
-      lastSyncAt: null,
-      nextSyncAt: null,
-      notes: "Lab compatibility tests for legacy adapters.",
-      logoUrl: "/images/mysql.png",
-    },
-    {
-      id: "db-mssql",
-      name: "Microsoft SQL Server",
-      category: "database",
-      provider: "Microsoft SQL Server",
-      env: "Prod",
-      enabled: true,
-      status: "connected",
-      host: "mssql.internal",
-      port: 1433,
-      dbName: "bridgepoint_dw",
-      userMasked: "svc_dw",
-      ssl: true,
-      lastSyncAt: inMinutes(-55),
-      nextSyncAt: inMinutes(5),
-      notes: "DW/SSIS landing (if required).",
-      logoUrl: "/images/mssql.png",
-    },
-    {
-      id: "db-azuresql",
-      name: "Azure SQL",
-      category: "database",
-      provider: "Azure SQL",
-      env: "Prod",
-      enabled: true,
-      status: "connecting",
-      host: "tcp:gm61-bridgepoint.database.windows.net",
-      port: 1433,
-      dbName: "bp_core",
-      userMasked: "bp_admin",
-      ssl: true,
-      lastSyncAt: inMinutes(-2),
-      nextSyncAt: inMinutes(10),
-      notes: "Cloud BI + finance staging.",
-      logoUrl: "/images/azuresql.png",
-    },
-  ];
-  return base;
-}
+// Allowed providers (your defined set)
+const ALLOWED_API: ApiProvider[] = ["Assure", "TDOC", "HealthEdge", "Sage Intacct", "Xero"];
+const ALLOWED_DB: DbProvider[]  = ["PostgreSQL", "MySQL", "Microsoft SQL Server", "Azure SQL"];
 
 /* =========================================================================
    Page
    ========================================================================= */
 export default function Connectors() {
-  const [connectors, setConnectors] = useState<AnyConnector[]>(seedConnectors());
+  // Live-only: start empty and load from backend
+  const [connectors, setConnectors] = useState<AnyConnector[]>([]);
   const [filter, setFilter] = useState<"all" | Category>("all");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<AnyConnector | null>(null);
   const [nowTick, setNowTick] = useState<number>(Date.now());
+  const [error, setError] = useState<string | null>(null);
 
-  // 1s tick for "Last updated" feel and to drive simulated status transitions if needed
+  const [showAddModal, setShowAddModal] = useState<boolean>(false);
+
+  // Env/tenant selection — TODO: derive from logged-in user
+  const ENV_ID = 2; // GM61 Limited in your seed
+
+  // 1s tick for "Last updated"
   useEffect(() => {
     const t = setInterval(() => setNowTick(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
 
-  // light simulation: randomly flip a connector from connecting->connected or connected->error occasionally
-  useEffect(() => {
-    const t = setInterval(() => {
-      setConnectors(prev => prev.map(c => {
-        if (!c.enabled) return c;
-        const roll = Math.random();
-        if (c.status === "connecting" && roll < 0.4) {
-          return { ...c, status: "connected", lastSyncAt: nowIso(), nextSyncAt: inMinutes(10) };
-        }
-        if (c.status === "connected" && roll < 0.02) {
-          return { ...c, status: "error", notes: (c.notes ?? "") + "" };
-        }
-        if (c.status === "error" && roll < 0.15) {
-          return { ...c, status: "connecting" };
-        }
-        return c;
+  // Load DB connections from backend (no demo seeds)
+  async function refreshDbConnections() {
+    try {
+      const rows = await listSqlConnections(ENV_ID);
+      const serverDbCards: DbConnector[] = rows.map((r) => ({
+        id: `db-sql-${r.id}`,
+        name: r.name || "PostgreSQL",
+        category: "database",
+        provider: "PostgreSQL",
+        env: "Prod",
+        enabled: true,
+        status: "disconnected",      // updated via Test/Sync
+        host: r.host,
+        port: r.port,
+        dbName: r.database_name,
+        userMasked: r.username,      // safe to display
+        ssl: false,                  // set true once schema includes ssl
+        lastSyncAt: null,
+        nextSyncAt: null,
+        notes: "From backend (sql_connections).",
+        logoUrl: "/images/postgres.png",
+        sqlId: r.id,                 // backend id to call
       }));
-    }, 12_000);
-    return () => clearInterval(t);
+      // We only show live data: DB from backend. (APIs can be added when backend route exists.)
+      setConnectors(serverDbCards);
+    } catch (err: any) {
+      // eslint-disable-next-line no-console
+      console.error("[connectors] failed to load sql_connections:", err);
+      setError(err?.message || "Failed to load database connections.");
+    }
+  }
+
+  useEffect(() => {
+    refreshDbConnections();
   }, []);
 
   const filtered = useMemo(() => {
@@ -277,8 +136,7 @@ export default function Connectors() {
     return connectors.filter(c => {
       if (filter !== "all" && c.category !== filter) return false;
       if (!q) return true;
-      const hay =
-        (c.name + " " + ("provider" in c ? c.provider : "") + " " + c.env + " " + (c.notes ?? "")).toLowerCase();
+      const hay = (c.name + " " + ("provider" in c ? (c as any).provider : "") + " " + c.env + " " + (c.notes ?? "")).toLowerCase();
       return hay.includes(q);
     });
   }, [connectors, filter, query]);
@@ -291,26 +149,60 @@ export default function Connectors() {
     setConnectors(prev => prev.map(c => (c.id === updated.id ? updated : c)));
   }
 
+  // DB cards with sqlId call backend; APIs currently disabled until backend route exists
   function testConnection(c: AnyConnector) {
-    const testing = { ...c, status: "connecting" as Status };
-    updateConnector(testing);
-    // simulate async
-    setTimeout(() => {
-      const ok = Math.random() > 0.12;
-      updateConnector({
-        ...testing,
-        status: ok ? "connected" : "error",
-        lastSyncAt: ok ? nowIso() : c.lastSyncAt ?? null,
-        nextSyncAt: ok ? inMinutes(10) : null,
-      });
-    }, 1200);
+    if (c.category === "database" && (c as DbConnector).sqlId) {
+      const sqlId = (c as DbConnector).sqlId!;
+      const testing = { ...c, status: "connecting" as Status };
+      updateConnector(testing);
+
+      testSqlConnection(sqlId)
+        .then((res) => {
+          const ok = res.ok;
+          updateConnector({
+            ...testing,
+            status: ok ? "connected" : "error",
+            lastSyncAt: ok ? nowIso() : c.lastSyncAt ?? null,
+            nextSyncAt: ok ? inMinutes(10) : null,
+            notes: ok ? c.notes : (c.notes ?? "") + (res.error ? ` • ${res.error}` : ""),
+          });
+        })
+        .catch((err) => {
+          // eslint-disable-next-line no-console
+          console.error("[connectors] test failed:", err);
+          updateConnector({ ...testing, status: "error", nextSyncAt: null });
+        });
+      return;
+    }
+
+    // For API connectors, we can show a toast or no-op until backend API is ready.
+    setError("Testing API connectors will be available once the backend route is added.");
   }
 
   function syncNow(c: AnyConnector) {
-    updateConnector({ ...c, status: "connecting" });
-    setTimeout(() => {
-      updateConnector({ ...c, status: "connected", lastSyncAt: nowIso(), nextSyncAt: inMinutes(15) });
-    }, 900);
+    if (c.category === "database" && (c as DbConnector).sqlId) {
+      const sqlId = (c as DbConnector).sqlId!;
+      updateConnector({ ...c, status: "connecting" });
+
+      runSqlSelect(sqlId, "SELECT version() AS pg_version, CURRENT_TIMESTAMP AS now")
+        .then((res) => {
+          updateConnector({
+            ...c,
+            status: "connected",
+            lastSyncAt: nowIso(),
+            nextSyncAt: inMinutes(15),
+            notes: `${c.notes ?? ""}${c.notes ? " • " : ""}Last sync ok (${res.count} row${res.count === 1 ? "" : "s"})`,
+          });
+        })
+        .catch((err) => {
+          // eslint-disable-next-line no-console
+          console.error("[connectors] sync failed:", err);
+          updateConnector({ ...c, status: "error", nextSyncAt: null, notes: (c.notes ?? "") + " • Sync failed" });
+        });
+      return;
+    }
+
+    setError("Sync for API connectors will be available once the backend route is added.");
   }
 
   function toggleEnabled(c: AnyConnector) {
@@ -326,13 +218,59 @@ export default function Connectors() {
     updateConnector({ ...c, status: "disconnected", nextSyncAt: null });
   }
 
+  /* ---- add connection ---- */
+  function openAddModal() {
+    setShowAddModal(true);
+  }
+  function closeAddModal() {
+    setShowAddModal(false);
+  }
+
+  async function createDbConnection(draft: NewConnectionDraft) {
+    try {
+      const payload = {
+        environment_id: ENV_ID,
+        name: draft.name,
+        host: draft.host,
+        database_name: draft.dbName,
+        port: Number(draft.port || 5432),
+        table_name: draft.tableName || null,
+        username: draft.username,
+        password: draft.password,
+      };
+      // Backend route:
+      // POST /api/v1/sql-connections -> inserts into sql_connections
+      await api.post("/v1/sql-connections", payload);
+      await refreshDbConnections();
+      closeAddModal();
+    } catch (err: any) {
+      setError(err?.message || "Failed to create database connection.");
+    }
+  }
+
+  async function createApiConnection(_draft: NewConnectionDraft) {
+    // Optional: wire when backend route exists
+    setError("Creating API connections will be available once the backend route is added.");
+  }
+
   /* ---- render ---- */
   return (
     <div className="container-xxl py-3">
       <div className="d-flex align-items-center justify-content-between mb-3">
         <h2 className="m-0">Connectors</h2>
-        <div className="text-muted small">Last refresh: {new Date(nowTick).toLocaleTimeString()}</div>
+        <div className="d-flex align-items-center gap-2">
+          <button className="btn btn-sm btn-outline-primary" onClick={openAddModal}>
+            <i className="bi bi-plus-circle" /> Add connection
+          </button>
+          <div className="text-muted small">Last refresh: {new Date(nowTick).toLocaleTimeString()}</div>
+        </div>
       </div>
+
+      {error && (
+        <div className="alert alert-danger" role="alert">
+          <i className="bi bi-exclamation-triangle" /> {error}
+        </div>
+      )}
 
       {/* toolbar */}
       <div className="card mb-3">
@@ -368,7 +306,7 @@ export default function Connectors() {
           <section className="mb-4">
             <h5 className="mb-2 d-flex align-items-center gap-2"><i className="bi bi-cloud" /> APIs</h5>
             {apis.length === 0 ? (
-              <div className="text-muted">No API connectors match your filters.</div>
+              <div className="text-muted">No API connectors yet.</div>
             ) : (
               <div className="row g-3">
                 {apis.map(c => (
@@ -390,7 +328,7 @@ export default function Connectors() {
           <section>
             <h5 className="mb-2 d-flex align-items-center gap-2"><i className="bi bi-database" /> Databases</h5>
             {dbs.length === 0 ? (
-              <div className="text-muted">No database connectors match your filters.</div>
+              <div className="text-muted">No database connectors yet.</div>
             ) : (
               <div className="row g-3">
                 {dbs.map(c => (
@@ -409,12 +347,12 @@ export default function Connectors() {
           </section>
 
           <div className="text-muted small mt-3">
-            Placeholder only — when the API is available, these controls will call live endpoints for auth, ping, and sync jobs.
+            Showing <strong>live</strong> connections from the backend. API creation/listing will appear once the API endpoints are available.
           </div>
         </div>
       </div>
 
-      {/* Edit modal */}
+      {/* Edit modal (existing) */}
       {selected && (
         <>
           <div
@@ -427,6 +365,25 @@ export default function Connectors() {
             value={selected}
             onClose={() => setSelected(null)}
             onSave={(v) => { updateConnector(v); setSelected(null); }}
+          />
+        </>
+      )}
+
+      {/* Add connection modal (new) */}
+      {showAddModal && (
+        <>
+          <div
+            className="position-fixed top-0 start-0 w-100 h-100 bg-black bg-opacity-25"
+            style={{ zIndex: 1049 }}
+            onClick={closeAddModal}
+            aria-hidden="true"
+          />
+          <AddConnectionModal
+            allowedApi={ALLOWED_API}
+            allowedDb={ALLOWED_DB}
+            onClose={closeAddModal}
+            onCreateDb={createDbConnection}
+            onCreateApi={createApiConnection}
           />
         </>
       )}
@@ -472,6 +429,10 @@ function ConnectorCard({
           </div>
           <div className={`d-flex align-items-center gap-1 ${chip.className}`} title={chip.text}>
             <i className={`bi ${chip.icon}`} /> <span className="small">{chip.text}</span>
+            {/* Optional indicator for live DB cards */}
+            {conn.category === "database" && (conn as DbConnector).sqlId && (
+              <span className="badge text-bg-secondary ms-2" title="Live backend">🔌</span>
+            )}
           </div>
         </div>
 
@@ -552,7 +513,212 @@ function DbMini({ c }: { c: DbConnector }) {
 }
 
 /* =========================================================================
-   Edit Modal (theme-aware, dependency-free)
+   Add Connection Modal (new)
+   ========================================================================= */
+type NewConnectionDraft = {
+  category: Category;
+  provider: ApiProvider | DbProvider | "";
+  name: string;
+  env: Env; // currently display-only; envId used to persist
+  // DB fields
+  host?: string;
+  port?: number | string;
+  dbName?: string;
+  tableName?: string;
+  username?: string;
+  password?: string;
+  // API fields (future)
+  baseUrl?: string;
+  apiKey?: string;
+  apiSecret?: string;
+  authType?: AuthType;
+};
+
+function AddConnectionModal({
+  allowedApi,
+  allowedDb,
+  onClose,
+  onCreateDb,
+  onCreateApi,
+}: {
+  allowedApi: ApiProvider[];
+  allowedDb: DbProvider[];
+  onClose: () => void;
+  onCreateDb: (draft: NewConnectionDraft) => Promise<void> | void;
+  onCreateApi: (draft: NewConnectionDraft) => Promise<void> | void;
+}) {
+  const [draft, setDraft] = useState<NewConnectionDraft>({
+    category: "database",
+    provider: "",
+    name: "",
+    env: "Prod",
+    host: "",
+    port: 5432,
+    dbName: "",
+    tableName: "",
+    username: "",
+    password: "",
+  });
+
+  const isDb = draft.category === "database";
+  const isApi = draft.category === "api";
+
+  function field<K extends keyof NewConnectionDraft>(k: K, v: NewConnectionDraft[K]) {
+    setDraft(prev => ({ ...prev, [k]: v }));
+  }
+
+  async function handleSave() {
+    if (!draft.name) return alert("Please enter a display name.");
+    if (!draft.provider) return alert("Please select a provider.");
+    if (isDb) {
+      if (!draft.host || !draft.dbName || !draft.username || !draft.password) {
+        return alert("Please enter host, database, username, and password.");
+      }
+      await onCreateDb(draft);
+      return;
+    }
+    if (isApi) {
+      if (!draft.baseUrl) return alert("Please enter base URL.");
+      await onCreateApi(draft);
+    }
+  }
+
+  return (
+    <div
+      className="position-fixed top-50 start-50 translate-middle shadow border rounded"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Add connection"
+      style={{
+        zIndex: 1050,
+        width: 780,
+        maxWidth: "95vw",
+        backgroundColor: "var(--bs-body-bg)",
+        color: "var(--bs-body-color)",
+        borderColor: "var(--bs-border-color)",
+      }}
+    >
+      <div className="border-bottom p-3 d-flex align-items-center justify-content-between">
+        <div className="d-flex align-items-center gap-2">
+          <i className="bi bi-plus-circle" /> <strong>Add connection</strong>
+        </div>
+        <button className="btn btn-sm btn-outline-secondary" onClick={onClose}>
+          <i className="bi bi-x-lg" /> Close
+        </button>
+      </div>
+
+      <div className="p-3">
+        <div className="row g-3">
+          <div className="col-md-4">
+            <label className="form-label">Category</label>
+            <select
+              className="form-select"
+              value={draft.category}
+              onChange={e => field("category", e.target.value as Category)}
+            >
+              <option value="database">Database</option>
+              <option value="api">API</option>
+            </select>
+          </div>
+          <div className="col-md-4">
+            <label className="form-label">Provider</label>
+            <select
+              className="form-select"
+              value={draft.provider || ""}
+              onChange={e => field("provider", e.target.value as any)}
+            >
+              <option value="">— Select —</option>
+              {(draft.category === "database" ? allowedDb : allowedApi).map(p => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </select>
+          </div>
+          <div className="col-md-4">
+            <label className="form-label">Display name</label>
+            <input className="form-control" value={draft.name} onChange={e => field("name", e.target.value)} />
+          </div>
+
+          {isDb && (
+            <>
+              <div className="col-md-7">
+                <label className="form-label">Server / Host</label>
+                <input className="form-control" value={draft.host} onChange={e => field("host", e.target.value)} />
+              </div>
+              <div className="col-md-2">
+                <label className="form-label">Port</label>
+                <input type="number" className="form-control" value={draft.port ?? 5432} onChange={e => field("port", Number(e.target.value))} />
+              </div>
+              <div className="col-md-3">
+                <label className="form-label">Database</label>
+                <input className="form-control" value={draft.dbName} onChange={e => field("dbName", e.target.value)} />
+              </div>
+              <div className="col-md-6">
+                <label className="form-label">Username</label>
+                <input className="form-control" value={draft.username} onChange={e => field("username", e.target.value)} />
+              </div>
+              <div className="col-md-6">
+                <label className="form-label">Password</label>
+                <input type="password" className="form-control" value={draft.password} onChange={e => field("password", e.target.value)} />
+              </div>
+              <div className="col-md-12">
+                <label className="form-label">Default table (optional)</label>
+                <input className="form-control" value={draft.tableName ?? ""} onChange={e => field("tableName", e.target.value)} />
+              </div>
+            </>
+          )}
+
+          {isApi && (
+            <>
+              <div className="col-12">
+                <label className="form-label">Base URL</label>
+                <input className="form-control" value={draft.baseUrl ?? ""} onChange={e => field("baseUrl", e.target.value)} />
+              </div>
+              <div className="col-md-6">
+                <label className="form-label">Auth type</label>
+                <select
+                  className="form-select"
+                  value={draft.authType ?? "apiKey"}
+                  onChange={e => field("authType", e.target.value as AuthType)}
+                >
+                  <option value="apiKey">API Key</option>
+                  <option value="oauth2">OAuth 2.0</option>
+                  <option value="basic">Basic</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </div>
+              <div className="col-md-6">
+                <label className="form-label">API key / client id</label>
+                <input className="form-control" value={draft.apiKey ?? ""} onChange={e => field("apiKey", e.target.value)} />
+              </div>
+              <div className="col-md-6">
+                <label className="form-label">Secret / client secret</label>
+                <input className="form-control" value={draft.apiSecret ?? ""} onChange={e => field("apiSecret", e.target.value)} />
+              </div>
+              <div className="col-md-6 d-flex align-items-end">
+                <div className="text-muted small">Creation of API connectors will persist when backend route is available.</div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="border-top p-3 d-flex justify-content-between">
+        <div className="text-muted small">
+          Provide connection details. Passwords are never shown back in the UI.
+        </div>
+        <div className="btn-group">
+          <button className="btn btn-outline-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleSave}>
+            <i className="bi bi-save" /> Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================================
+   Edit Modal (existing)
    ========================================================================= */
 function EditConnectorModal({
   value,
