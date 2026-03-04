@@ -1,8 +1,8 @@
-
 // src/pages/Settings.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../features/auth/AuthContext";
+import { useModules } from "../features/modules/ModulesContext";
 
 /** --- API base (proxy-friendly default) --- */
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
@@ -20,12 +20,12 @@ export type OrgUpdate = Partial<Pick<Organization, "name" | "domain" | "address"
 
 export type UserRow = {
   id: string;
-  username: string;       // backend username (separate from names)
-  firstName: string;      // mapped from backend first_name
-  lastName: string;       // mapped from backend last_name
+  username: string; // backend username (separate from names)
+  firstName: string; // mapped from backend first_name
+  lastName: string; // mapped from backend last_name
   email: string;
   role: "admin" | "editor" | "viewer"; // mapped from "Admin" | "Editor" | "Viewer"
-  active: boolean;        // mapped from backend "is_active"
+  active: boolean; // mapped from backend "is_active"
 };
 
 export type ConnectionSummary = {
@@ -41,21 +41,53 @@ export type AppInfo = {
   buildTime?: string;
 };
 
-/** --- Modules (placeholder) --- */
+/** --- Modules (DB-backed, with local fallback) --- */
+export type ModuleKey =
+  | "machine-monitoring"
+  | "finance"
+  | "integration-hub"
+  | "tray-archive"
+  | "analytics";
+
 export type ModuleRow = {
-  key: string;
+  key: ModuleKey;
   name: string;
   description?: string;
   enabled: boolean;
 };
 
-/** Initial placeholder modules; adjust as BridgePoint grows */
+/** Canonical module catalogue (keep keys stable; names/descriptions are UI-only) */
 const DEFAULT_MODULES: ModuleRow[] = [
-  { key: "sterile-services", name: "Sterile Services", description: "Core sterile services workflow.", enabled: true },
-  { key: "instruments",      name: "Instruments",      description: "Instrument-level tracking & reports.", enabled: true },
-  { key: "analytics",        name: "Analytics",        description: "Dashboards & performance insights.", enabled: true },
-  { key: "maintenance",      name: "Maintenance",      description: "Device maintenance scheduling.", enabled: false },
-  { key: "finance",          name: "Finance",          description: "Costing, billing & chargebacks.", enabled: false },
+  {
+    key: "machine-monitoring",
+    name: "Machine Monitoring",
+    description: "Washers and device telemetry (MMM uploads, cycle graphs, history).",
+    enabled: true,
+  },
+  {
+    key: "finance",
+    name: "Finance",
+    description: "Costing, billing & chargebacks.",
+    enabled: false,
+  },
+  {
+    key: "integration-hub",
+    name: "Integration Hub",
+    description: "Pipelines & connectors for custom API integrations.",
+    enabled: false,
+  },
+  {
+    key: "tray-archive",
+    name: "Tray Archive",
+    description: "GS1 tray/instrument archive (later).",
+    enabled: false,
+  },
+  {
+    key: "analytics",
+    name: "Analytics",
+    description: "Dashboards & performance insights.",
+    enabled: false,
+  },
 ];
 
 /** --- Connections placeholder only (backend not built yet) --- */
@@ -175,17 +207,56 @@ function rowsDiffer(a: UserRow, b: UserRow) {
   );
 }
 
+/** --- Local fallback persistence for modules (kept as backup) --- */
+function modulesStorageKey(envId: number | null) {
+  return envId == null ? "bridgepoint_modules:global" : `bridgepoint_modules:${envId}`;
+}
+function loadModulesFromStorage(envId: number | null): ModuleRow[] {
+  try {
+    const raw = localStorage.getItem(modulesStorageKey(envId));
+    if (!raw) return DEFAULT_MODULES;
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      // Merge in case new modules were added later
+      return mergeModules(DEFAULT_MODULES, parsed as any[]);
+    }
+    return DEFAULT_MODULES;
+  } catch {
+    return DEFAULT_MODULES;
+  }
+}
+function saveModulesToStorage(envId: number | null, data: ModuleRow[]) {
+  try {
+    localStorage.setItem(modulesStorageKey(envId), JSON.stringify(data));
+  } catch {
+    /* ignore storage failures */
+  }
+}
+
+/** --- Merge helper: ensure we always return all DEFAULT_MODULES keys in correct order --- */
+function mergeModules(defaults: ModuleRow[], incoming: Array<{ key: string; enabled?: boolean }>): ModuleRow[] {
+  const map = new Map<string, boolean>();
+  for (const row of incoming) {
+    if (row?.key) map.set(String(row.key), Boolean(row.enabled));
+  }
+  return defaults.map((d) => ({
+    ...d,
+    enabled: map.has(d.key) ? Boolean(map.get(d.key)) : d.enabled,
+  }));
+}
+
 /** --- Settings page --- */
 export default function Settings() {
   const { token } = useAuth();
+  const { reload } = useModules(); // ✅ refresh module config after save
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [org, setOrg] = useState<Organization | null>(null);
   const [users, setUsers] = useState<UserRow[]>([]);
-  const [usersDraft, setUsersDraft] = useState<UserRow[]>([]);   // parent-level draft list
-  const [bulkSaving, setBulkSaving] = useState(false);           // disable inputs while bulk saving
+  const [usersDraft, setUsersDraft] = useState<UserRow[]>([]); // parent-level draft list
+  const [bulkSaving, setBulkSaving] = useState(false); // disable inputs while bulk saving
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
 
   // Organization edit state
@@ -194,7 +265,7 @@ export default function Settings() {
   const [orgEditing, setOrgEditing] = useState(false);
 
   // Users edit/add state
-  const [userSaving, setUserSaving] = useState<string | null>(null);  // used for per-row operations (e.g., reset pw)
+  const [userSaving, setUserSaving] = useState<string | null>(null); // used for per-row operations (e.g., reset pw)
   const [userAdding, setUserAdding] = useState(false);
 
   // Users pagination/show-more
@@ -204,33 +275,55 @@ export default function Settings() {
   // Connections (placeholder)
   const [summary, setSummary] = useState<ConnectionSummary | null>(PLACEHOLDER_SUMMARY);
 
-  // Modules (placeholder: persisted to localStorage per environment)
-  const [modules, setModules] = useState<ModuleRow[]>([]);           // current UI draft
+  // Modules (DB-backed with fallback)
+  const [modules, setModules] = useState<ModuleRow[]>([]); // UI draft
   const [modulesSaving, setModulesSaving] = useState(false);
   const [modulesDirty, setModulesDirty] = useState(false);
+  const [modulesSource, setModulesSource] = useState<"api" | "local">("local");
 
   const baseHeaders = useMemo(() => authHeaders(token), [token]);
 
-  // --- Helpers: local persistence for modules until backend exists ---
-  function modulesStorageKey(envId: number | null) {
-    return envId == null ? "bridgepoint_modules:global" : `bridgepoint_modules:${envId}`;
-  }
-  function loadModulesFromStorage(envId: number | null): ModuleRow[] {
+  /** --- Modules API helpers --- */
+  async function fetchModulesFromApi(envId: number | null): Promise<ModuleRow[] | null> {
     try {
-      const raw = localStorage.getItem(modulesStorageKey(envId));
-      if (!raw) return DEFAULT_MODULES;
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed as ModuleRow[];
-      return DEFAULT_MODULES;
-    } catch {
-      return DEFAULT_MODULES;
+      const res = await fetch(`${API_BASE}/environment/modules`, {
+        method: "GET",
+        headers: withEnvHeader(baseHeaders, envId),
+      });
+      if (!res.ok) throw new Error(await safeErrMsg(res));
+
+      const raw = await res.json();
+      const list = Array.isArray(raw) ? raw : Array.isArray(raw?.modules) ? raw.modules : [];
+
+      const merged = mergeModules(DEFAULT_MODULES, list as any[]);
+      return merged;
+    } catch (e: any) {
+      console.warn("GET /environment/modules failed (falling back to localStorage):", e?.message ?? e);
+      return null;
     }
   }
-  function saveModulesToStorage(envId: number | null, data: ModuleRow[]) {
+
+  async function saveModulesToApi(envId: number | null, data: ModuleRow[]): Promise<ModuleRow[] | null> {
     try {
-      localStorage.setItem(modulesStorageKey(envId), JSON.stringify(data));
-    } catch {
-      /* ignore storage failures */
+      const payload = {
+        modules: data.map((m) => ({ key: m.key, enabled: m.enabled })),
+      };
+
+      const res = await fetch(`${API_BASE}/environment/modules`, {
+        method: "PUT",
+        headers: withEnvHeader(baseHeaders, envId),
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(await safeErrMsg(res));
+
+      const raw = await res.json();
+      const list = Array.isArray(raw) ? raw : Array.isArray(raw?.modules) ? raw.modules : payload.modules;
+
+      const merged = mergeModules(DEFAULT_MODULES, list as any[]);
+      return merged;
+    } catch (e: any) {
+      console.warn("PUT /environment/modules failed:", e?.message ?? e);
+      return null;
     }
   }
 
@@ -256,7 +349,7 @@ export default function Settings() {
 
         const envId = numericEnvId(orgData?.id);
 
-        /** 2) In parallel: users (scoped) and version */
+        /** 2) In parallel: users (scoped) and version and modules */
         const usersPromise = (async () => {
           try {
             const res = await fetch(`${API_BASE}/users`, {
@@ -295,23 +388,30 @@ export default function Settings() {
           }
         })();
 
-        const [usersData, versionData] = await Promise.all([usersPromise, versionPromise]);
+        const modulesPromise = (async () => {
+          const fromApi = await fetchModulesFromApi(envId);
+          if (fromApi) return { data: fromApi, source: "api" as const };
+
+          const fromLocal = loadModulesFromStorage(envId);
+          return { data: fromLocal, source: "local" as const };
+        })();
+
+        const [usersData, versionData, modulesData] = await Promise.all([usersPromise, versionPromise, modulesPromise]);
 
         if (!cancelled) {
           setOrg(orgData);
           setUsers(usersData);
-          setUsersDraft(usersData.map((u) => ({ ...u })));    // initialize draft to original
-          setUsersVisible(DEFAULT_VISIBLE);                    // reset visible to default on load
+          setUsersDraft(usersData.map((u) => ({ ...u })));
+          setUsersVisible(DEFAULT_VISIBLE);
           setAppInfo(versionData);
 
-          // Connections placeholder — refresh lastUpdated so setter is used
           setSummary((prev) => {
             const base = prev ?? PLACEHOLDER_SUMMARY;
             return { ...base, lastUpdated: new Date().toISOString() };
           });
 
-          // Modules (placeholder) — load per environment from localStorage
-          setModules(loadModulesFromStorage(envId));
+          setModules(modulesData.data);
+          setModulesSource(modulesData.source);
           setModulesDirty(false);
 
           setOrgEdit({});
@@ -327,7 +427,10 @@ export default function Settings() {
     }
 
     load();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [baseHeaders]);
 
   /** --- Organization editing --- */
@@ -341,7 +444,10 @@ export default function Settings() {
       timezone: org.timezone ?? "",
     });
   }
-  function cancelOrgEdit() { setOrgEditing(false); setOrgEdit({}); }
+  function cancelOrgEdit() {
+    setOrgEditing(false);
+    setOrgEdit({});
+  }
   async function saveOrgEdit() {
     if (!org) return;
     setOrgSaving(true);
@@ -361,39 +467,6 @@ export default function Settings() {
       setError(err?.message ?? "Failed to update organization.");
     } finally {
       setOrgSaving(false);
-    }
-  }
-
-  /** --- Users: persist single row --- */
-  async function updateUser(row: UserRow) {
-    setUserSaving(row.id);
-    setError(null);
-
-    const envId = numericEnvId(org?.id);
-    try {
-      const res = await fetch(`${API_BASE}/users/${encodeURIComponent(row.id)}`, {
-        method: "PATCH",
-        headers: withEnvHeader(baseHeaders, envId),
-        body: JSON.stringify({
-          username: row.username,
-          first_name: row.firstName || null,
-          last_name: row.lastName || null,
-          email: row.email || null,
-          role: toBackendRole(row.role),
-          is_active: row.active,
-        }),
-      });
-      if (!res.ok) throw new Error(await safeErrMsg(res));
-
-      const updatedBackend: BackendUser = await res.json();
-      const updated = normalizeUserRow(updatedBackend);
-      // Update both original and draft lists
-      setUsers((prev) => prev.map((u) => (u.id === row.id ? updated : u)));
-      setUsersDraft((prev) => prev.map((u) => (u.id === row.id ? { ...updated } : u)));
-    } catch (err: any) {
-      setError(err?.message ?? "Failed to update user.");
-    } finally {
-      setUserSaving(null);
     }
   }
 
@@ -429,7 +502,7 @@ export default function Settings() {
         headers: withEnvHeader(baseHeaders, envId),
         body: JSON.stringify({
           username: "new.user",
-          first_name: null,              // optional fields as null (avoids EmailStr validation errors)
+          first_name: null,
           last_name: null,
           email: null,
           role: toBackendRole("viewer"),
@@ -442,7 +515,6 @@ export default function Settings() {
       const created = normalizeUserRow(createdBackend);
       setUsers((prev) => [created, ...prev]);
       setUsersDraft((prev) => [{ ...created }, ...prev]);
-      // Keep visible count sensible after adding (ensure at least DEFAULT_VISIBLE)
       setUsersVisible((v) => Math.max(v, DEFAULT_VISIBLE));
     } catch (err: any) {
       setError(err?.message ?? "Failed to create user.");
@@ -458,7 +530,6 @@ export default function Settings() {
   });
 
   function discardAllUserChanges() {
-    // Revert draft back to originals
     setUsersDraft(users.map((u) => ({ ...u })));
     setUsersVisible(DEFAULT_VISIBLE);
   }
@@ -485,18 +556,47 @@ export default function Settings() {
     }
   }
 
+  async function updateUser(row: UserRow) {
+    setUserSaving(row.id);
+    setError(null);
+
+    const envId = numericEnvId(org?.id);
+    try {
+      const res = await fetch(`${API_BASE}/users/${encodeURIComponent(row.id)}`, {
+        method: "PATCH",
+        headers: withEnvHeader(baseHeaders, envId),
+        body: JSON.stringify({
+          username: row.username,
+          first_name: row.firstName || null,
+          last_name: row.lastName || null,
+          email: row.email || null,
+          role: toBackendRole(row.role),
+          is_active: row.active,
+        }),
+      });
+      if (!res.ok) throw new Error(await safeErrMsg(res));
+
+      const updatedBackend: BackendUser = await res.json();
+      const updated = normalizeUserRow(updatedBackend);
+      setUsers((prev) => prev.map((u) => (u.id === row.id ? updated : u)));
+      setUsersDraft((prev) => prev.map((u) => (u.id === row.id ? { ...updated } : u)));
+    } catch (err: any) {
+      setError(err?.message ?? "Failed to update user.");
+    } finally {
+      setUserSaving(null);
+    }
+  }
+
   async function saveAllUserChanges() {
     setBulkSaving(true);
     setError(null);
     try {
-      // Save each changed row sequentially (clearer errors; change to Promise.all if you prefer)
       for (const d of usersDraft) {
         const orig = users.find((u) => u.id === d.id);
         if (!orig || rowsDiffer(orig, d)) {
           await updateUser(d);
         }
       }
-      // After saving, align drafts with the (updated) originals
       setUsersDraft((prev) => prev.map((u) => ({ ...u })));
     } catch (err: any) {
       setError(err?.message ?? "Failed to save user changes.");
@@ -505,26 +605,46 @@ export default function Settings() {
     }
   }
 
-  /** --- Modules (placeholder): toggle/save/reset --- */
-  function toggleModule(key: string, enabled: boolean) {
+  /** --- Modules: toggle/save/reset --- */
+  function toggleModule(key: ModuleKey, enabled: boolean) {
     setModules((prev) => {
       const next = prev.map((m) => (m.key === key ? { ...m, enabled } : m));
       setModulesDirty(true);
       return next;
     });
   }
+
   function resetModulesToDefault() {
     setModules(DEFAULT_MODULES);
     setModulesDirty(true);
   }
+
   async function saveModules() {
     setModulesSaving(true);
     setError(null);
+
+    const envId = numericEnvId(org?.id);
+
     try {
-      const envId = numericEnvId(org?.id);
-      // Placeholder persistence (localStorage) until backend exists
+      const saved = await saveModulesToApi(envId, modules);
+
+      if (saved) {
+        setModules(saved);
+        setModulesSource("api");
+        setModulesDirty(false);
+
+        // ✅ KEY FIX: refresh module config so nav + guards update immediately
+        await reload();
+
+        return;
+      }
+
+      // Fallback: localStorage
       saveModulesToStorage(envId, modules);
+      setModulesSource("local");
       setModulesDirty(false);
+
+      setError((prev) => prev ?? "Saved locally (API not available yet).");
     } catch (err: any) {
       setError(err?.message ?? "Failed to save modules.");
     } finally {
@@ -557,7 +677,7 @@ export default function Settings() {
   }
 
   return (
-    <div className="container-xxl py-3 settings-page">{/* wider container */}
+    <div className="container-xxl py-3 settings-page">
       <div className="d-flex align-items-center justify-content-between mb-3">
         <h2 className="m-0">Settings</h2>
         <div className="text-muted small">
@@ -679,7 +799,9 @@ export default function Settings() {
           <div className="d-flex align-items-center gap-2">
             <i className="bi bi-people" aria-hidden="true" />
             <strong>Users</strong>
-            <span className="ms-2 text-muted small">({Math.min(usersVisible, totalUsers)} of {totalUsers})</span>
+            <span className="ms-2 text-muted small">
+              ({Math.min(usersVisible, totalUsers)} of {totalUsers})
+            </span>
           </div>
           <div className="d-flex flex-wrap gap-2">
             <button className="btn btn-sm btn-outline-secondary" onClick={refreshUsersFromServer} disabled={userAdding || bulkSaving}>
@@ -714,6 +836,7 @@ export default function Settings() {
             </button>
           </div>
         </div>
+
         <div className="card-body" style={{ overflowX: "auto" }}>
           {usersDraft.length === 0 ? (
             <div className="text-muted">No users found.</div>
@@ -723,15 +846,14 @@ export default function Settings() {
                 <table className="table align-middle" style={{ tableLayout: "fixed" }}>
                   <thead>
                     <tr>
-                      {/* New indicator column */}
                       <th style={{ width: "2%" }} aria-label="Unsaved change indicator"></th>
                       <th style={{ width: "16%" }}>Username</th>
                       <th style={{ width: "16%" }}>First name</th>
                       <th style={{ width: "16%" }}>Last name</th>
                       <th style={{ width: "24%" }}>Email</th>
                       <th style={{ width: "12%" }}>Role</th>
-                      <th style={{ width: "6%"  }} className="text-center">Active</th>
-                      <th style={{ width: "8%"  }} className="text-end">Actions</th> {/* Only Reset per row */}
+                      <th style={{ width: "6%" }} className="text-center">Active</th>
+                      <th style={{ width: "8%" }} className="text-end">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -755,7 +877,6 @@ export default function Settings() {
                 </table>
               </div>
 
-              {/* Show more / Show less controls (now blue like Add user) */}
               <div className="d-flex justify-content-center gap-2 mt-2">
                 {canShowMore && (
                   <button className="btn btn-sm btn-outline-primary" onClick={() => showMoreUsers(5)}>
@@ -773,7 +894,7 @@ export default function Settings() {
         </div>
       </div>
 
-      {/* Modules (placeholder) */}
+      {/* Modules */}
       <div className="card mb-3">
         <div className="card-header d-flex align-items-center justify-content-between">
           <div className="d-flex align-items-center gap-2">
@@ -807,34 +928,38 @@ export default function Settings() {
           {modules.length === 0 ? (
             <div className="text-muted">No modules available.</div>
           ) : (
-            <div className="row g-3">
-              {modules.map((m) => (
-                <div key={m.key} className="col-md-6">
-                  <div className="p-3 border rounded d-flex align-items-start justify-content-between">
-                    <div className="me-3">
-                      <div className="fw-semibold">{m.name}</div>
-                      {m.description ? <div className="text-muted small">{m.description}</div> : null}
-                    </div>
-                    <div className="form-check form-switch">
-                      <input
-                        className="form-check-input"
-                        type="checkbox"
-                        id={`mod-${m.key}`}
-                        checked={m.enabled}
-                        onChange={(e) => toggleModule(m.key, e.target.checked)}
-                      />
-                      <label className="form-check-label" htmlFor={`mod-${m.key}`}>
-                        {m.enabled ? "Enabled" : "Disabled"}
-                      </label>
+            <>
+              <div className="row g-3">
+                {modules.map((m) => (
+                  <div key={m.key} className="col-md-6">
+                    <div className="p-3 border rounded d-flex align-items-start justify-content-between">
+                      <div className="me-3">
+                        <div className="fw-semibold">{m.name}</div>
+                        {m.description ? <div className="text-muted small">{m.description}</div> : null}
+                      </div>
+                      <div className="form-check form-switch">
+                        <input
+                          className="form-check-input"
+                          type="checkbox"
+                          id={`mod-${m.key}`}
+                          checked={m.enabled}
+                          onChange={(e) => toggleModule(m.key, e.target.checked)}
+                        />
+                        <label className="form-check-label" htmlFor={`mod-${m.key}`}>
+                          {m.enabled ? "Enabled" : "Disabled"}
+                        </label>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+
+              <div className="text-muted small mt-3">
+                Source: <strong>{modulesSource === "api" ? "Database (API)" : "Local (fallback)"}</strong>
+                {modulesSource === "local" ? " — API not available yet or failed." : null}
+              </div>
+            </>
           )}
-          <div className="text-muted small mt-3">
-            Placeholder only — configuration is stored locally per environment until backend API is available.
-          </div>
         </div>
       </div>
 
@@ -849,7 +974,7 @@ export default function Settings() {
             <div className="text-muted">No connection summary available.</div>
           ) : (
             <div className="row g-3">
-              <Stat title="Total"  value={summary.total}  icon="bi-diagram-3" />
+              <Stat title="Total" value={summary.total} icon="bi-diagram-3" />
               <Stat title="Active" value={summary.active} icon="bi-check-circle" />
               <Stat title="Failed" value={summary.failed} icon="bi-exclamation-triangle" />
               <div className="col-12">
@@ -889,8 +1014,14 @@ function UserRowEditor({
   async function handleConfirmReset() {
     setResetErr(null);
     setResetOk(false);
-    if (!pw1) { setResetErr("Password is required."); return; }
-    if (pw1 !== pw2) { setResetErr("Passwords do not match."); return; }
+    if (!pw1) {
+      setResetErr("Password is required.");
+      return;
+    }
+    if (pw1 !== pw2) {
+      setResetErr("Passwords do not match.");
+      return;
+    }
 
     setResetting(true);
     const ok = await onResetPassword(draft.id, pw1);
@@ -899,8 +1030,10 @@ function UserRowEditor({
       setResetOk(true);
       setPw1("");
       setPw2("");
-      // auto-close after a brief success cue
-      setTimeout(() => { setShowReset(false); setResetOk(false); }, 900);
+      setTimeout(() => {
+        setShowReset(false);
+        setResetOk(false);
+      }, 900);
     } else {
       setResetErr("Failed to reset password.");
     }
@@ -908,15 +1041,14 @@ function UserRowEditor({
 
   return (
     <>
-      {/* Removed yellow highlight; add blue dot indicator in first cell when row is dirty */}
       <tr>
-        {/* Indicator cell */}
-        <td className="text-center" title={rowDirty ? "Unsaved changes" : ""} aria-label={rowDirty ? "Unsaved changes" : undefined}>
+        <td
+          className="text-center"
+          title={rowDirty ? "Unsaved changes" : ""}
+          aria-label={rowDirty ? "Unsaved changes" : undefined}
+        >
           {rowDirty ? (
-            <span
-              className="d-inline-block rounded-circle bg-primary"
-              style={{ width: 8, height: 8 }}
-            />
+            <span className="d-inline-block rounded-circle bg-primary" style={{ width: 8, height: 8 }} />
           ) : null}
         </td>
 
@@ -966,7 +1098,6 @@ function UserRowEditor({
           </select>
         </td>
 
-        {/* Centered switch (no label; a11y via aria-label) */}
         <td className="text-center">
           <div className="form-check form-switch d-flex justify-content-center align-items-center m-0 p-0">
             <input
@@ -981,7 +1112,6 @@ function UserRowEditor({
           </div>
         </td>
 
-        {/* Actions: only Reset Password per row */}
         <td className="text-end">
           <button
             className="btn btn-sm btn-outline-danger"
@@ -994,19 +1124,22 @@ function UserRowEditor({
         </td>
       </tr>
 
-      {/* Inline reset panel (theme-aware) */}
       {showReset && (
         <tr>
-          {/* Colspan matches header count (indicator + 7 columns = 8) */}
           <td colSpan={8}>
-            {/* Use bg-body-tertiary so this adapts to dark/light themes */}
             <div className="border rounded p-3 bg-body-tertiary">
               <div className="d-flex justify-content-between align-items-center mb-2">
-                <strong>Reset password for <code>{draft.username}</code></strong>
+                <strong>
+                  Reset password for <code>{draft.username}</code>
+                </strong>
                 <button
                   type="button"
                   className="btn btn-sm btn-outline-secondary"
-                  onClick={() => { setShowReset(false); setResetErr(null); setResetOk(false); }}
+                  onClick={() => {
+                    setShowReset(false);
+                    setResetErr(null);
+                    setResetOk(false);
+                  }}
                   disabled={resetting}
                 >
                   <i className="bi bi-x" aria-hidden="true" /> Close
@@ -1038,11 +1171,7 @@ function UserRowEditor({
                   />
                 </div>
                 <div className="col-md-4 d-flex align-items-end justify-content-end">
-                  <button
-                    className="btn btn-danger"
-                    onClick={handleConfirmReset}
-                    disabled={resetting}
-                  >
+                  <button className="btn btn-danger" onClick={handleConfirmReset} disabled={resetting}>
                     {resetting ? (
                       <>
                         <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true" />

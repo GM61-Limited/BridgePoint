@@ -1,13 +1,9 @@
-
 // src/pages/layout.tsx
 import React, { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../features/auth/AuthContext";
+import { useModules } from "../features/modules/ModulesContext";
 
-/** Dev: http://localhost:8000 ; Prod: /api behind Nginx */
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
-
-type EnvironmentResponse = { id: number; name: string; domain: string };
 type Theme = "system" | "light" | "dark";
 const THEME_KEY = "bp_theme";
 
@@ -26,9 +22,10 @@ function applyTheme(t: Theme) {
 }
 
 export default function Layout() {
-  const { token, logout } = useAuth(); // token for /environment; logout does hard refresh
+  const { logout } = useAuth(); // logout does hard refresh
+  const { environment, isEnabled, loading: modulesLoading, error: modulesError } = useModules();
+
   const [collapsed, setCollapsed] = useState(false);
-  const [env, setEnv] = useState<EnvironmentResponse | null>(null);
   const [signingOut, setSigningOut] = useState(false);
 
   // --- Theme state ---
@@ -53,25 +50,6 @@ export default function Layout() {
     media.addEventListener("change", onChange);
     return () => media.removeEventListener("change", onChange);
   }, [theme]);
-
-  // Environment badge fetch (runs when token is available/changes)
-  useEffect(() => {
-    const abort = new AbortController();
-    async function loadEnv() {
-      try {
-        if (!token) return;
-        const res = await fetch(`${API_BASE}/environment`, {
-          headers: { Authorization: `Bearer ${token}` },
-          signal: abort.signal,
-        });
-        if (res.ok) setEnv(await res.json());
-      } catch {
-        // ignore network/API errors for the badge
-      }
-    }
-    loadEnv();
-    return () => abort.abort();
-  }, [token]);
 
   // ---- Sign out handler ----
   async function handleSignOut() {
@@ -105,9 +83,23 @@ export default function Layout() {
   const toggleTitle =
     actualTheme === "dark" ? "Switch to light (Alt: follow system)" : "Switch to dark (Alt: follow system)";
 
+  // -------------------------
+  // Module visibility flags
+  // -------------------------
+  const showMachineMonitoring = isEnabled("machine-monitoring");
+  const showIntegrationHub = isEnabled("integration-hub");
+  const showAnalytics = isEnabled("analytics");
+  const showFinance = isEnabled("finance");
+
+  // Alerts are part of machine monitoring ✅ (your decision)
+  const showAlerts = showMachineMonitoring;
+
+  // What should the environment badge show?
+  const envLabel =
+    modulesLoading ? "Environment" : environment?.name ? environment.name : "Environment";
+
   return (
     <div className={`app-shell d-flex ${collapsed ? "sidebar-collapsed" : ""}`}>
-
       {/* ---------- Sidebar ---------- */}
       <aside className="sidebar">
         <div className="px-3 py-3 d-flex align-items-center border-bottom">
@@ -116,7 +108,7 @@ export default function Layout() {
         </div>
 
         <nav className="nav flex-column px-2 py-2" aria-label="Primary">
-          {/* Home */}
+          {/* Home (core) */}
           <NavLink
             to="/home"
             end
@@ -128,91 +120,97 @@ export default function Layout() {
             <span className="sidebar-label">Home</span>
           </NavLink>
 
-          {/* Pipelines (Soon) */}
-          <NavLink
-            to="/pipelines"
-            className={({ isActive }) =>
-              `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
-            }
-          >
-            <span className="d-flex align-items-center">
-              <i className="bi bi-diagram-3 me-2" aria-hidden="true" />
-              <span className="sidebar-label">Pipelines</span>
-            </span>
-            
-          </NavLink>
+          {/* Integration Hub: Pipelines */}
+          {showIntegrationHub && (
+            <NavLink
+              to="/pipelines"
+              className={({ isActive }) =>
+                `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
+              }
+            >
+              <span className="d-flex align-items-center">
+                <i className="bi bi-diagram-3 me-2" aria-hidden="true" />
+                <span className="sidebar-label">Pipelines</span>
+              </span>
+            </NavLink>
+          )}
 
-          {/* Connectors (LIVE — aligned, keep badge) */}
-          <NavLink
-            to="/connectors"
-            className={({ isActive }) =>
-              `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
-            }
-          >
-            <span className="d-flex align-items-center">
-              <i className="bi bi-plug me-2" aria-hidden="true" />
-              <span className="sidebar-label">Connectors</span>
-            </span>
-            <span className="badge text-bg-primary ms-2">New</span>
-          </NavLink>
+          {/* Integration Hub: Connectors */}
+          {showIntegrationHub && (
+            <NavLink
+              to="/connectors"
+              className={({ isActive }) =>
+                `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
+              }
+            >
+              <span className="d-flex align-items-center">
+                <i className="bi bi-plug me-2" aria-hidden="true" />
+                <span className="sidebar-label">Connectors</span>
+              </span>
+            </NavLink>
+          )}
 
-          {/* Dashboards (Soon) */}
-          <NavLink
-            to="/dashboards"
-            className={({ isActive }) =>
-              `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
-            }
-          >
-            <span className="d-flex align-items-center">
-              <i className="bi bi-bar-chart-line me-2" aria-hidden="true" />
-              <span className="sidebar-label">Dashboards</span>
-            </span>
-            
-          </NavLink>
+          {/* Analytics: Dashboards */}
+          {showAnalytics && (
+            <NavLink
+              to="/dashboards"
+              className={({ isActive }) =>
+                `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
+              }
+            >
+              <span className="d-flex align-items-center">
+                <i className="bi bi-bar-chart-line me-2" aria-hidden="true" />
+                <span className="sidebar-label">Dashboards</span>
+              </span>
+            </NavLink>
+          )}
 
-          {/* Finance (Soon) */}
-          <NavLink
-            to="/finance"
-            className={({ isActive }) =>
-              `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
-            }
-          >
-            <span className="d-flex align-items-center">
-              <i className="bi bi-currency-pound me-2" aria-hidden="true" />
-              <span className="sidebar-label">Finance</span>
-            </span>
-            
-          </NavLink>
+          {/* Finance */}
+          {showFinance && (
+            <NavLink
+              to="/finance"
+              className={({ isActive }) =>
+                `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
+              }
+            >
+              <span className="d-flex align-items-center">
+                <i className="bi bi-currency-pound me-2" aria-hidden="true" />
+                <span className="sidebar-label">Finance</span>
+              </span>
+            </NavLink>
+          )}
 
-          {/* Alerts (Soon) */}
-          <NavLink
-            to="/alerts"
-            className={({ isActive }) =>
-              `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
-            }
-          >
-            <span className="d-flex align-items-center">
-              <i className="bi bi-bell me-2" aria-hidden="true" />
-              <span className="sidebar-label">Alerts</span>
-            </span>
-            
-          </NavLink>
+          {/* Alerts (Machine Monitoring) */}
+          {showAlerts && (
+            <NavLink
+              to="/alerts"
+              className={({ isActive }) =>
+                `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
+              }
+            >
+              <span className="d-flex align-items-center">
+                <i className="bi bi-bell me-2" aria-hidden="true" />
+                <span className="sidebar-label">Alerts</span>
+              </span>
+            </NavLink>
+          )}
 
-          {/* Washers (New) */}
-          <NavLink
-            to="/washers"
-            className={({ isActive }) =>
-              `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
-            }
-          >
-            <span className="d-flex align-items-center">
-              <i className="bi bi-droplet me-2" aria-hidden="true" />
-              <span className="sidebar-label">Washers</span>
-            </span>
-            <span className="badge text-bg-primary ms-2">New</span>
-          </NavLink>
+          {/* Machine Monitoring: Washers */}
+          {showMachineMonitoring && (
+            <NavLink
+              to="/washers"
+              className={({ isActive }) =>
+                `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
+              }
+            >
+              <span className="d-flex align-items-center">
+                <i className="bi bi-droplet me-2" aria-hidden="true" />
+                <span className="sidebar-label">Washers</span>
+              </span>
+            </NavLink>
+          )}
 
-          {/* Settings */}
+          {/* Settings (core) */}
           <NavLink
             to="/settings"
             className={({ isActive }) =>
@@ -222,6 +220,14 @@ export default function Layout() {
             <i className="bi bi-gear me-2" aria-hidden="true" />
             <span className="sidebar-label">Settings</span>
           </NavLink>
+
+          {/* Optional: show a tiny warning if modules failed to load */}
+          {modulesError && (
+            <div className="px-3 pt-2 text-warning small">
+              <i className="bi bi-exclamation-triangle me-1" aria-hidden="true" />
+              Module config failed to load
+            </div>
+          )}
         </nav>
 
         <div className="mt-auto px-3 py-3 border-top">
@@ -231,7 +237,10 @@ export default function Layout() {
             aria-pressed={collapsed}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
-            <i className={`bi ${collapsed ? "bi-layout-sidebar-inset" : "bi-layout-sidebar"}`} aria-hidden="true" />
+            <i
+              className={`bi ${collapsed ? "bi-layout-sidebar-inset" : "bi-layout-sidebar"}`}
+              aria-hidden="true"
+            />
             <span className="ms-2 sidebar-label">{collapsed ? "Expand" : "Collapse"}</span>
           </button>
         </div>
@@ -242,12 +251,13 @@ export default function Layout() {
         <header className="topbar" aria-label="Top bar">
           <div className="d-flex align-items-center justify-content-between px-3 py-2">
             {/* Environment badge */}
-            <span className="badge bg-secondary">{env ? env.name : "Environment"}</span>
+            <span className="badge bg-secondary">{envLabel}</span>
 
             <div className="d-flex align-items-center gap-2">
-              {/* Notifications */}
+              {/* Notifications (placeholder) */}
               <button className={`btn btn-sm ${btnOutline}`}>
-                <i className="bi bi-bell" aria-hidden="true" /> <span className="sidebar-label">Notifications</span>
+                <i className="bi bi-bell" aria-hidden="true" />{" "}
+                <span className="sidebar-label">Notifications</span>
               </button>
 
               {/* Theme toggle */}

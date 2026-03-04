@@ -158,3 +158,33 @@ export async function runSqlSelect<T = any>(id: number, sql: string, params: any
   );
   return data;
 }
+
+// ---------- Environment / Modules ----------
+
+import type { Environment, ModuleToggle } from "../features/modules/types";
+
+export async function getEnvironment() {
+  const { data } = await api.get<Environment>("/environment");
+  return data;
+}
+
+export async function getEnvironmentModules(envId: number) {
+  const { data } = await api.get<{ environmentId?: number; modules?: ModuleToggle[] } | ModuleToggle[]>(
+    "/environment/modules",
+    { headers: { "X-Environment-Id": String(envId) } }
+  );
+
+  // Backend returns { environmentId, modules } (expected), but handle plain array too
+  if (Array.isArray(data)) return data as ModuleToggle[];
+  return Array.isArray((data as any)?.modules) ? ((data as any).modules as ModuleToggle[]) : [];
+}
+
+export async function putEnvironmentModules(envId: number, modules: ModuleToggle[]) {
+  const { data } = await api.put<{ environmentId?: number; modules?: ModuleToggle[] }>(
+    "/environment/modules",
+    { modules },
+    { headers: { "X-Environment-Id": String(envId) } }
+  );
+
+  return Array.isArray((data as any)?.modules) ? ((data as any).modules as ModuleToggle[]) : modules;
+}

@@ -1,23 +1,34 @@
-
 # app/main.py
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 import os
 
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
 from app.core.config import settings
+
+# Existing routers
 from app.api.v1.auth_routes import router as auth_router
 from app.api.v1.me_routes import router as me_router
 from app.api.v1.admin_routes import router as admin_router
 
-# NEW: SQL Connections router (list/test/query external Postgres using params from sql_connections)
+# SQL Connections router (list/test/query external Postgres using params from sql_connections)
 from app.api.v1.sql_connections_routes import router as sql_connections_router
+
+# Modules router (environment module enablement)
+from app.api.v1.modules_routes import router as modules_router
 
 # (Optional) if you later add the connectors module and want to expose those routes too:
 # from app.api.v1.connectors_routes import router as connectors_router
 
-app = FastAPI(title=settings.APP_NAME)
 
+app = FastAPI(
+    title=settings.APP_NAME,
+    version=os.getenv("APP_VERSION", "unknown"),
+)
+
+# -------------------------
 # CORS
+# -------------------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in settings.ALLOWED_ORIGINS if o.strip()],
@@ -26,16 +37,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Health/hello
+# -------------------------
+# Health / hello
+# -------------------------
 @app.get("/health")
 def health():
     return {"ok": True, "time": "up"}
+
 
 @app.get("/hello")
 def hello_world():
     return {"message": "Hello World From GM61 BridgePoint!"}
 
+
+# -------------------------
 # Optional: App version metadata for Settings "About BridgePoint"
+# -------------------------
 @app.get("/version")
 def version():
     return {
@@ -44,16 +61,23 @@ def version():
         "buildTime": os.getenv("BUILD_TIME"),
     }
 
-# API v1
+
+# -------------------------
+# API routes
+# -------------------------
 app.include_router(auth_router)
 app.include_router(me_router)
 app.include_router(admin_router)
 
-# NEW: Register SQL Connections API
+# Register SQL Connections API
 app.include_router(sql_connections_router)
+
+# Register Modules API
+app.include_router(modules_router)
 
 # (Optional) if you add the connectors routes:
 # app.include_router(connectors_router)
+
 
 # ----------------------------------------------------------------------
 # OPTIONAL: If you want the app to ensure certain tables exist on startup

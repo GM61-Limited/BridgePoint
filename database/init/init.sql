@@ -15,6 +15,24 @@ CREATE TABLE IF NOT EXISTS environment (
 );
 
 -- =========================================
+-- Environment Modules (per tenant / environment)
+-- Stores which modules are enabled for each environment
+-- =========================================
+CREATE TABLE IF NOT EXISTS environment_modules (
+    environment_id INT NOT NULL REFERENCES environment(id) ON DELETE CASCADE,
+    module_key VARCHAR(100) NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+
+    -- Prevent duplicates per environment/module
+    CONSTRAINT environment_modules_pk PRIMARY KEY (environment_id, module_key)
+);
+
+-- Helpful index (optional but nice for lookups)
+CREATE INDEX IF NOT EXISTS idx_environment_modules_env
+    ON environment_modules (environment_id);
+
+-- =========================================
 -- Users (tenant-scoped)
 -- =========================================
 CREATE TABLE IF NOT EXISTS users (
@@ -145,3 +163,19 @@ WHERE NOT EXISTS (
       AND sc.port = 5432
       AND sc.database_name = 'postgres'
 );
+
+-- =========================================
+-- Seed default module enablement per environment (BridgePoint module catalogue)
+-- =========================================
+INSERT INTO environment_modules (environment_id, module_key, enabled)
+SELECT e.id, m.module_key, m.enabled
+FROM environment e
+CROSS JOIN (
+    VALUES
+      ('machine-monitoring', TRUE),
+      ('integration-hub',    FALSE),
+      ('finance',            FALSE),
+      ('tray-archive',       FALSE),
+      ('analytics',          FALSE)
+) AS m(module_key, enabled)
+ON CONFLICT (environment_id, module_key) DO NOTHING;

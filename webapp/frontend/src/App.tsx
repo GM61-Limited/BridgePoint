@@ -1,4 +1,3 @@
-
 // src/App.tsx
 import { type ReactNode, useEffect } from "react";
 import {
@@ -28,9 +27,11 @@ import Connectors from "./pages/connectors";
 // Pipelines
 import Pipelines from "./pages/pipelines";
 
-// ⭐ NEW — Real Dashboards page
+// Dashboards
 import Dashboards from "./pages/dashboards";
 
+import { ModulesProvider } from "./features/modules/ModulesContext";
+import { RequireModule } from "./features/modules/RequireModule";
 
 function BodyClassSync() {
   const { pathname } = useLocation();
@@ -53,10 +54,7 @@ function BodyClassSync() {
 
 function FullPageSpinner() {
   return (
-    <div
-      className="d-flex align-items-center justify-content-center"
-      style={{ minHeight: "100vh" }}
-    >
+    <div className="d-flex align-items-center justify-content-center" style={{ minHeight: "100vh" }}>
       <div className="spinner-border text-primary" role="status" />
     </div>
   );
@@ -99,52 +97,130 @@ export default function App() {
             path="/"
             element={
               <ProtectedRoute>
-                <Layout />
+                <ModulesProvider>
+                  <Layout />
+                </ModulesProvider>
               </ProtectedRoute>
             }
           >
             <Route index element={<Home />} />
             <Route path="home" element={<Home />} />
 
+            {/* Always available */}
             <Route path="settings" element={<Settings />} />
 
-            {/* Washers */}
-            <Route path="washers" element={<WashersOverview />} />
-            <Route path="reprocessing" element={<WashersOverview />} />
-            <Route path="devices/:deviceId" element={<DeviceDetail />} />
-
-            {/* Cycles */}
-            <Route path="wash-cycles" element={<WashCycles />} />
-            <Route path="wash-cycles/upload" element={<UploadCycle />} />
-
-            {/* Connectors */}
-            <Route path="connectors" element={<Connectors />} />
-            <Route path="integrations" element={<Navigate to="/connectors" replace />} />
-
-            {/* Pipelines */}
-            <Route path="pipelines" element={<Pipelines />} />
-            <Route path="workflows" element={<Navigate to="/pipelines" replace />} />
-
-            {/* ⭐ Real Dashboards page */}
-            <Route path="dashboards" element={<Dashboards />} />
-
-            {/* Other placeholders */}
+            {/* Machine Monitoring */}
             <Route
-              path="alerts"
+              path="washers"
               element={
-                <UnderConstruction
-                  title="Alerts"
-                  description="Real-time alerts and notifications are on the way."
-                />
+                <RequireModule module="machine-monitoring">
+                  <WashersOverview />
+                </RequireModule>
               }
             />
             <Route
+              path="reprocessing"
+              element={
+                <RequireModule module="machine-monitoring">
+                  <WashersOverview />
+                </RequireModule>
+              }
+            />
+            <Route
+              path="devices/:deviceId"
+              element={
+                <RequireModule module="machine-monitoring">
+                  <DeviceDetail />
+                </RequireModule>
+              }
+            />
+
+            {/* Cycles */}
+            <Route
+              path="wash-cycles"
+              element={
+                <RequireModule module="machine-monitoring">
+                  <WashCycles />
+                </RequireModule>
+              }
+            />
+            <Route
+              path="wash-cycles/upload"
+              element={
+                <RequireModule module="machine-monitoring">
+                  <UploadCycle />
+                </RequireModule>
+              }
+            />
+
+            {/* Integration Hub */}
+            <Route
+              path="connectors"
+              element={
+                <RequireModule module="integration-hub">
+                  <Connectors />
+                </RequireModule>
+              }
+            />
+            <Route
+              path="integrations"
+              element={
+                <RequireModule module="integration-hub">
+                  <Navigate to="/connectors" replace />
+                </RequireModule>
+              }
+            />
+
+            <Route
+              path="pipelines"
+              element={
+                <RequireModule module="integration-hub">
+                  <Pipelines />
+                </RequireModule>
+              }
+            />
+            <Route
+              path="workflows"
+              element={
+                <RequireModule module="integration-hub">
+                  <Navigate to="/pipelines" replace />
+                </RequireModule>
+              }
+            />
+
+            {/* Analytics */}
+            <Route
+              path="dashboards"
+              element={
+                <RequireModule module="analytics">
+                  <Dashboards />
+                </RequireModule>
+              }
+            />
+
+            {/* Alerts (I’m gating this under machine monitoring by default) */}
+            <Route
+              path="alerts"
+              element={
+                <RequireModule module="machine-monitoring">
+                  <UnderConstruction
+                    title="Alerts"
+                    description="Real-time alerts and notifications are on the way."
+                  />
+                </RequireModule>
+              }
+            />
+
+            {/* Finance */}
+            <Route
               path="finance"
               element={
-                <UnderConstruction
-                  title="Finance"
-                  description="ERP integrations and billing orchestration are coming soon."
-                />
+                <RequireModule module="finance">
+                  <UnderConstruction
+                    title="Finance"
+                    description="ERP integrations and billing orchestration are coming soon."
+                  />
+                </RequireModule>
               }
             />
           </Route>
