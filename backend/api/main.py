@@ -1,5 +1,6 @@
 # app/main.py
 import os
+import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,8 +18,17 @@ from app.api.v1.sql_connections_routes import router as sql_connections_router
 # Modules router (environment module enablement)
 from app.api.v1.modules_routes import router as modules_router
 
+# Lookups + Machines routers
+from app.api.v1.lookup_routes import router as lookup_router
+from app.api.v1.machine_routes import router as machine_router
+
+from app.api.v1.washer_cycles_routes import router as washer_cycles_router
+
 # (Optional) if you later add the connectors module and want to expose those routes too:
 # from app.api.v1.connectors_routes import router as connectors_router
+
+
+log = logging.getLogger("bridgepoint")
 
 
 app = FastAPI(
@@ -74,6 +84,22 @@ app.include_router(sql_connections_router)
 
 # Register Modules API
 app.include_router(modules_router)
+
+# Register Lookups + Machines APIs
+app.include_router(lookup_router)
+app.include_router(machine_router)
+
+app.include_router(washer_cycles_router)
+
+# ✅ Register Uploads API (safe optional import so backend never fails to boot)
+try:
+    # ✅ Register Uploads API (fail fast in dev so we don't silently ship 404s)
+    from app.api.v1.uploads_routes import router as uploads_router
+    app.include_router(uploads_router)
+    log.info("Uploads API enabled: /v1/uploads/*")
+except Exception as e:
+    # IMPORTANT: don't crash the entire backend if uploads file isn't present in the image yet
+    log.warning("Uploads API NOT enabled (uploads_routes missing or failed to import): %s", e)
 
 # (Optional) if you add the connectors routes:
 # app.include_router(connectors_router)

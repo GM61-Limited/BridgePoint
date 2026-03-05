@@ -44,9 +44,11 @@ export default function Layout() {
   useEffect(() => {
     const media = window.matchMedia?.("(prefers-color-scheme: dark)");
     if (!media) return;
+
     const onChange = () => {
       if (theme === "system") applyTheme("system");
     };
+
     media.addEventListener("change", onChange);
     return () => media.removeEventListener("change", onChange);
   }, [theme]);
@@ -81,7 +83,9 @@ export default function Layout() {
   // Icon reflects the current actual theme
   const iconClass = actualTheme === "dark" ? "bi-sun" : "bi-moon";
   const toggleTitle =
-    actualTheme === "dark" ? "Switch to light (Alt: follow system)" : "Switch to dark (Alt: follow system)";
+    actualTheme === "dark"
+      ? "Switch to light (Alt: follow system)"
+      : "Switch to dark (Alt: follow system)";
 
   // -------------------------
   // Module visibility flags
@@ -95,8 +99,7 @@ export default function Layout() {
   const showAlerts = showMachineMonitoring;
 
   // What should the environment badge show?
-  const envLabel =
-    modulesLoading ? "Environment" : environment?.name ? environment.name : "Environment";
+  const envLabel = modulesLoading ? "Environment" : environment?.name ? environment.name : "Environment";
 
   return (
     <div className={`app-shell d-flex ${collapsed ? "sidebar-collapsed" : ""}`}>
@@ -112,110 +115,175 @@ export default function Layout() {
           <NavLink
             to="/home"
             end
-            className={({ isActive }) =>
-              `nav-link d-flex align-items-center ${isActive ? "active" : ""}`
-            }
+            className={({ isActive }) => `nav-link d-flex align-items-center ${isActive ? "active" : ""}`}
           >
             <i className="bi bi-house-door me-2" aria-hidden="true" />
             <span className="sidebar-label">Home</span>
           </NavLink>
 
-          {/* Integration Hub: Pipelines */}
-          {showIntegrationHub && (
-            <NavLink
-              to="/pipelines"
-              className={({ isActive }) =>
-                `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
-              }
-            >
-              <span className="d-flex align-items-center">
-                <i className="bi bi-diagram-3 me-2" aria-hidden="true" />
-                <span className="sidebar-label">Pipelines</span>
-              </span>
-            </NavLink>
-          )}
-
-          {/* Integration Hub: Connectors */}
-          {showIntegrationHub && (
-            <NavLink
-              to="/connectors"
-              className={({ isActive }) =>
-                `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
-              }
-            >
-              <span className="d-flex align-items-center">
-                <i className="bi bi-plug me-2" aria-hidden="true" />
-                <span className="sidebar-label">Connectors</span>
-              </span>
-            </NavLink>
-          )}
-
-          {/* Analytics: Dashboards */}
-          {showAnalytics && (
-            <NavLink
-              to="/dashboards"
-              className={({ isActive }) =>
-                `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
-              }
-            >
-              <span className="d-flex align-items-center">
-                <i className="bi bi-bar-chart-line me-2" aria-hidden="true" />
-                <span className="sidebar-label">Dashboards</span>
-              </span>
-            </NavLink>
-          )}
-
-          {/* Finance */}
-          {showFinance && (
-            <NavLink
-              to="/finance"
-              className={({ isActive }) =>
-                `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
-              }
-            >
-              <span className="d-flex align-items-center">
-                <i className="bi bi-currency-pound me-2" aria-hidden="true" />
-                <span className="sidebar-label">Finance</span>
-              </span>
-            </NavLink>
-          )}
-
-          {/* Alerts (Machine Monitoring) */}
-          {showAlerts && (
-            <NavLink
-              to="/alerts"
-              className={({ isActive }) =>
-                `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
-              }
-            >
-              <span className="d-flex align-items-center">
-                <i className="bi bi-bell me-2" aria-hidden="true" />
-                <span className="sidebar-label">Alerts</span>
-              </span>
-            </NavLink>
-          )}
-
-          {/* Machine Monitoring: Washers */}
+          {/* -------- Machine Monitoring -------- */}
           {showMachineMonitoring && (
-            <NavLink
-              to="/washers"
-              className={({ isActive }) =>
-                `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
-              }
-            >
-              <span className="d-flex align-items-center">
-                <i className="bi bi-droplet me-2" aria-hidden="true" />
-                <span className="sidebar-label">Washers</span>
-              </span>
-            </NavLink>
+            <>
+              <div className="px-3 pt-3 pb-1 text-secondary small" style={{ opacity: 0.9 }}>
+                MACHINE MONITORING
+              </div>
+
+              {/* Machines (overview/list) */}
+              <NavLink
+                to="/machines"
+                className={({ isActive }) =>
+                  `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
+                }
+              >
+                <span className="d-flex align-items-center">
+                  <i className="bi bi-hdd-stack me-2" aria-hidden="true" />
+                  <span className="sidebar-label">Machines</span>
+                </span>
+              </NavLink>
+
+              {/* Cycles */}
+              <NavLink
+                to="/wash-cycles"
+                className={({ isActive }) =>
+                  `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
+                }
+              >
+                <span className="d-flex align-items-center">
+                  <i className="bi bi-arrow-repeat me-2" aria-hidden="true" />
+                  <span className="sidebar-label">Cycles</span>
+                </span>
+              </NavLink>
+
+              {/* Upload cycles */}
+              <NavLink
+                to="/wash-cycles/upload"
+                className={({ isActive }) =>
+                  `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
+                }
+              >
+                <span className="d-flex align-items-center">
+                  <i className="bi bi-upload me-2" aria-hidden="true" />
+                  <span className="sidebar-label">Upload cycles</span>
+                </span>
+              </NavLink>
+
+              {/* Alerts */}
+              {showAlerts && (
+                <NavLink
+                  to="/alerts"
+                  className={({ isActive }) =>
+                    `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
+                  }
+                >
+                  <span className="d-flex align-items-center">
+                    <i className="bi bi-bell me-2" aria-hidden="true" />
+                    <span className="sidebar-label">Alerts</span>
+                  </span>
+                </NavLink>
+              )}
+
+              {/* ---------------------------------------------------------
+                  Future: Performance / Overview / Statistics
+                  Add this later when you build the page/route.
+                  ---------------------------------------------------------
+              <NavLink
+                to="/performance"
+                className={({ isActive }) =>
+                  `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
+                }
+              >
+                <span className="d-flex align-items-center">
+                  <i className="bi bi-graph-up me-2" aria-hidden="true" />
+                  <span className="sidebar-label">Performance</span>
+                </span>
+              </NavLink>
+              */}
+            </>
+          )}
+
+          {/* -------- Integration Hub -------- */}
+          {showIntegrationHub && (
+            <>
+              <div className="px-3 pt-3 pb-1 text-secondary small" style={{ opacity: 0.9 }}>
+                INTEGRATION HUB
+              </div>
+
+              <NavLink
+                to="/pipelines"
+                className={({ isActive }) =>
+                  `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
+                }
+              >
+                <span className="d-flex align-items-center">
+                  <i className="bi bi-diagram-3 me-2" aria-hidden="true" />
+                  <span className="sidebar-label">Pipelines</span>
+                </span>
+              </NavLink>
+
+              <NavLink
+                to="/connectors"
+                className={({ isActive }) =>
+                  `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
+                }
+              >
+                <span className="d-flex align-items-center">
+                  <i className="bi bi-plug me-2" aria-hidden="true" />
+                  <span className="sidebar-label">Connectors</span>
+                </span>
+              </NavLink>
+            </>
+          )}
+
+          {/* -------- Analytics -------- */}
+          {showAnalytics && (
+            <>
+              <div className="px-3 pt-3 pb-1 text-secondary small" style={{ opacity: 0.9 }}>
+                ANALYTICS
+              </div>
+
+              <NavLink
+                to="/dashboards"
+                className={({ isActive }) =>
+                  `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
+                }
+              >
+                <span className="d-flex align-items-center">
+                  <i className="bi bi-bar-chart-line me-2" aria-hidden="true" />
+                  <span className="sidebar-label">Dashboards</span>
+                </span>
+              </NavLink>
+            </>
+          )}
+
+          {/* -------- Finance -------- */}
+          {showFinance && (
+            <>
+              <div className="px-3 pt-3 pb-1 text-secondary small" style={{ opacity: 0.9 }}>
+                FINANCE
+              </div>
+
+              <NavLink
+                to="/finance"
+                className={({ isActive }) =>
+                  `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
+                }
+              >
+                <span className="d-flex align-items-center">
+                  <i className="bi bi-currency-pound me-2" aria-hidden="true" />
+                  <span className="sidebar-label">Finance</span>
+                </span>
+              </NavLink>
+            </>
           )}
 
           {/* Settings (core) */}
+          <div className="px-3 pt-3 pb-1 text-secondary small" style={{ opacity: 0.9 }}>
+            CORE
+          </div>
+
           <NavLink
             to="/settings"
-            className={({ isActive }) =>
-              `nav-link d-flex align-items-center ${isActive ? "active" : ""}`
-            }
+            className={({ isActive }) => `nav-link d-flex align-items-center ${isActive ? "active" : ""}`}
           >
             <i className="bi bi-gear me-2" aria-hidden="true" />
             <span className="sidebar-label">Settings</span>

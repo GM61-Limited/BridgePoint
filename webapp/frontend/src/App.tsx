@@ -1,4 +1,3 @@
-// src/App.tsx
 import { type ReactNode, useEffect } from "react";
 import {
   BrowserRouter,
@@ -15,9 +14,10 @@ import LoginPage from "./pages/LoginPage";
 import Settings from "./pages/settings";
 import UnderConstruction from "./pages/UnderConstruction";
 
-// Washers module pages
+// Machine Monitoring pages
 import DeviceDetail from "./pages/DeviceDetail";
 import UploadCycle from "./pages/UploadCycle";
+import WashCycleDetails from "./pages/WashCycleDetails";
 import WashCycles from "./pages/WashCycles";
 import WashersOverview from "./pages/WashersOverview";
 
@@ -54,7 +54,10 @@ function BodyClassSync() {
 
 function FullPageSpinner() {
   return (
-    <div className="d-flex align-items-center justify-content-center" style={{ minHeight: "100vh" }}>
+    <div
+      className="d-flex align-items-center justify-content-center"
+      style={{ minHeight: "100vh" }}
+    >
       <div className="spinner-border text-primary" role="status" />
     </div>
   );
@@ -63,15 +66,21 @@ function FullPageSpinner() {
 function ProtectedRoute({ children }: { children?: ReactNode }) {
   const location = useLocation();
   const { isAuthenticated, bootstrapping } = useAuth();
+
   if (bootstrapping) return <FullPageSpinner />;
-  return isAuthenticated
-    ? <>{children}</>
-    : <Navigate to="/login" replace state={{ from: location }} />;
+
+  return isAuthenticated ? (
+    <>{children}</>
+  ) : (
+    <Navigate to="/login" replace state={{ from: location }} />
+  );
 }
 
 function AnonOnlyRoute({ children }: { children?: ReactNode }) {
   const { isAuthenticated, bootstrapping } = useAuth();
+
   if (bootstrapping) return <FullPageSpinner />;
+
   return isAuthenticated ? <Navigate to="/" replace /> : <>{children}</>;
 }
 
@@ -80,8 +89,8 @@ export default function App() {
     <AuthProvider>
       <BrowserRouter>
         <BodyClassSync />
-        <Routes>
 
+        <Routes>
           {/* Login */}
           <Route
             path="/login"
@@ -111,21 +120,20 @@ export default function App() {
 
             {/* Machine Monitoring */}
             <Route
-              path="washers"
+              path="machines"
               element={
                 <RequireModule module="machine-monitoring">
                   <WashersOverview />
                 </RequireModule>
               }
             />
+
+            {/* Backwards compatibility */}
             <Route
-              path="reprocessing"
-              element={
-                <RequireModule module="machine-monitoring">
-                  <WashersOverview />
-                </RequireModule>
-              }
+              path="washers"
+              element={<Navigate to="/machines" replace />}
             />
+
             <Route
               path="devices/:deviceId"
               element={
@@ -144,11 +152,22 @@ export default function App() {
                 </RequireModule>
               }
             />
+
             <Route
               path="wash-cycles/upload"
               element={
                 <RequireModule module="machine-monitoring">
                   <UploadCycle />
+                </RequireModule>
+              }
+            />
+
+            {/* ✅ NEW: Cycle Details */}
+            <Route
+              path="wash-cycles/:id"
+              element={
+                <RequireModule module="machine-monitoring">
+                  <WashCycleDetails />
                 </RequireModule>
               }
             />
@@ -198,7 +217,7 @@ export default function App() {
               }
             />
 
-            {/* Alerts (I’m gating this under machine monitoring by default) */}
+            {/* Alerts */}
             <Route
               path="alerts"
               element={
