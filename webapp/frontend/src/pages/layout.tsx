@@ -141,6 +141,19 @@ export default function Layout() {
                 </span>
               </NavLink>
 
+              {/* ✅ NEW: Machines Dashboard */}
+              <NavLink
+                to="/machines/dashboard"
+                className={({ isActive }) =>
+                  `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
+                }
+              >
+                <span className="d-flex align-items-center">
+                  <i className="bi bi-graph-up me-2" aria-hidden="true" />
+                  <span className="sidebar-label">Dashboard</span>
+                </span>
+              </NavLink>
+
               {/* Cycles */}
               <NavLink
                 to="/wash-cycles"
@@ -154,18 +167,7 @@ export default function Layout() {
                 </span>
               </NavLink>
 
-              {/* Upload cycles */}
-              <NavLink
-                to="/wash-cycles/upload"
-                className={({ isActive }) =>
-                  `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
-                }
-              >
-                <span className="d-flex align-items-center">
-                  <i className="bi bi-upload me-2" aria-hidden="true" />
-                  <span className="sidebar-label">Upload cycles</span>
-                </span>
-              </NavLink>
+              {/* Upload cycles (REMOVED from sidebar; now accessed from machine cards/details) */}
 
               {/* Alerts */}
               {showAlerts && (
@@ -181,23 +183,6 @@ export default function Layout() {
                   </span>
                 </NavLink>
               )}
-
-              {/* ---------------------------------------------------------
-                  Future: Performance / Overview / Statistics
-                  Add this later when you build the page/route.
-                  ---------------------------------------------------------
-              <NavLink
-                to="/performance"
-                className={({ isActive }) =>
-                  `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
-                }
-              >
-                <span className="d-flex align-items-center">
-                  <i className="bi bi-graph-up me-2" aria-hidden="true" />
-                  <span className="sidebar-label">Performance</span>
-                </span>
-              </NavLink>
-              */}
             </>
           )}
 
@@ -305,10 +290,7 @@ export default function Layout() {
             aria-pressed={collapsed}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
-            <i
-              className={`bi ${collapsed ? "bi-layout-sidebar-inset" : "bi-layout-sidebar"}`}
-              aria-hidden="true"
-            />
+            <i className={`bi ${collapsed ? "bi-layout-sidebar-inset" : "bi-layout-sidebar"}`} aria-hidden="true" />
             <span className="ms-2 sidebar-label">{collapsed ? "Expand" : "Collapse"}</span>
           </button>
         </div>

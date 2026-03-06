@@ -21,6 +21,9 @@ import WashCycleDetails from "./pages/WashCycleDetails";
 import WashCycles from "./pages/WashCycles";
 import WashersOverview from "./pages/WashersOverview";
 
+// ✅ NEW: Machine Monitoring Dashboard
+import MachinesDashboard from "./pages/MachinesDashboard";
+
 // Connectors
 import Connectors from "./pages/connectors";
 
@@ -128,6 +131,16 @@ export default function App() {
               }
             />
 
+            {/* ✅ NEW: Machines Dashboard */}
+            <Route
+              path="machines/dashboard"
+              element={
+                <RequireModule module="machine-monitoring">
+                  <MachinesDashboard />
+                </RequireModule>
+              }
+            />
+
             {/* Backwards compatibility */}
             <Route
               path="washers"
@@ -162,7 +175,7 @@ export default function App() {
               }
             />
 
-            {/* ✅ NEW: Cycle Details */}
+            {/* ✅ Cycle Details */}
             <Route
               path="wash-cycles/:id"
               element={

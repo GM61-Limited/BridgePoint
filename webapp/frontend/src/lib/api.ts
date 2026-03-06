@@ -194,6 +194,7 @@ export async function putEnvironmentModules(
 }
 
 // ---------- Machines / Lookups ----------
+// In src/lib/api.ts, inside export type Machine = { ... }
 export type Machine = {
   id: number;
   environment_id: number;
@@ -215,6 +216,13 @@ export type Machine = {
   integration_key?: string | null;
   created_at?: string;
   updated_at?: string;
+
+  // ✅ Optional “last cycle” fields (backend may already provide something like these)
+  last_cycle_number?: number | string | null;
+  last_program_name?: string | null;
+  last_operator?: string | null;
+  last_cycle_ended_at?: string | null;
+  last_cycle_result?: boolean | string | null;
 };
 
 export type MachineType = {
@@ -365,20 +373,32 @@ export async function listWasherXmlUploads(params?: {
 }
 
 // ---------- Washer Cycles ----------
+// ---------- Washer Cycles ----------
 export type WasherCycleStage = {
   started_at?: string;
   ended_at?: string;
   temperature_c?: number;
 };
 
+// src/lib/api.ts (update WasherCycle type)
 export type WasherCycle = {
   id: number;
   cycle_number: number | null;
-  machine_name: string;
   program_name: string | null;
+
+  // ✅ add this (backend returns it)
+  machine_id: number;
+
+  // already in your type, keep it
+  machine_name: string;
+
   started_at?: string;
   ended_at?: string | null;
   duration_sec?: number | null;
+
+  // backend returns this too (nice to have)
+  original_filename?: string | null;
+
   result: boolean | null;
 
   extra?: {

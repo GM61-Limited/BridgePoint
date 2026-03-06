@@ -1,3 +1,4 @@
+// src/pages/WashCycles.tsx
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, listWasherCycles, type WasherCycle } from "../lib/api";
@@ -9,6 +10,8 @@ import { api, listWasherCycles, type WasherCycle } from "../lib/api";
 const formatDateTime = (value?: string | null) =>
   value ? new Date(value).toLocaleString() : "—";
 
+type ResultBadge = "PASS" | "FAIL" | "UNKNOWN";
+
 /* --------------------------------------------------
    Table row model (UI-safe)
 -------------------------------------------------- */
@@ -17,14 +20,17 @@ type WashCycleRow = {
   id: number;
   cycleNo: number | null;
   program: string;
-  machine: string;
+
+  machineId: number;
+  machineName: string;
+
   start?: string | null;
   end?: string | null;
-  result: "PASS" | "FAIL" | "UNKNOWN";
+  result: ResultBadge;
 };
 
 function toRow(c: WasherCycle): WashCycleRow {
-  let result: "PASS" | "FAIL" | "UNKNOWN" = "UNKNOWN";
+  let result: ResultBadge = "UNKNOWN";
   if (c.result === true) result = "PASS";
   else if (c.result === false) result = "FAIL";
 
@@ -32,7 +38,8 @@ function toRow(c: WasherCycle): WashCycleRow {
     id: c.id,
     cycleNo: c.cycle_number,
     program: c.program_name ?? "—",
-    machine: c.machine_name,
+    machineId: c.machine_id,
+    machineName: c.machine_name,
     start: c.started_at ?? null,
     end: c.ended_at ?? null,
     result,
@@ -41,22 +48,23 @@ function toRow(c: WasherCycle): WashCycleRow {
 
 export default function WashCycles() {
   const [params, setParams] = useSearchParams();
-  const deviceParam = params.get("device");
-  const initialDevice = deviceParam ?? "ALL";
+
+  // Preferred param + legacy compatibility
+  const machineIdParam = params.get("machineId") || params.get("device");
+  const machineNameParam = params.get("machine"); // legacy/friendly-only
 
   const [rows, setRows] = useState<WashCycleRow[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [statusMsg, setStatusMsg] = useState<string>("");
 
   // Filters
-  const [filterDevice, setFilterDevice] = useState<string>(initialDevice);
+  const [filterMachineId, setFilterMachineId] = useState<number | "ALL">("ALL");
   const [filterProgram, setFilterProgram] = useState<string>("ALL");
   const [fromDate, setFromDate] = useState<string>("");
   const [toDate, setToDate] = useState<string>("");
 
-  useEffect(() => {
-    setFilterDevice(deviceParam ?? "ALL");
-  }, [deviceParam]);
+  const [machineLocked, setMachineLocked] = useState(false);
+  const [lockedMachineLabel, setLockedMachineLabel] = useState<string>("");
 
   // Load parsed washer cycles
   async function loadCycles() {
@@ -66,9 +74,7 @@ export default function WashCycles() {
       const mapped = cycles.map(toRow);
       setRows(mapped);
       setStatusMsg(
-        mapped.length
-          ? `Loaded ${mapped.length} cycle(s).`
-          : "No cycles yet. Upload cycles to begin."
+        mapped.length ? `Loaded ${mapped.length} cycle(s).` : "No cycles yet. Upload cycles to begin."
       );
     } finally {
       setLoading(false);
@@ -79,22 +85,75 @@ export default function WashCycles() {
     loadCycles();
   }, []);
 
-  const machineOptions = useMemo(
-    () => Array.from(new Set(rows.map((r) => r.machine))).sort(),
-    [rows]
-  );
+  // Build machine options from the loaded rows (id->name)
+  const machineOptions = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const r of rows) {
+      if (!map.has(r.machineId)) map.set(r.machineId, r.machineName);
+    }
+    return Array.from(map.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [rows]);
 
-  const programOptions = useMemo(
-    () =>
-      Array.from(
-        new Set(rows.map((r) => r.program).filter((p) => p && p !== "—"))
-      ).sort(),
-    [rows]
-  );
+  const programOptions = useMemo(() => {
+    return Array.from(new Set(rows.map((r) => r.program).filter((p) => p && p !== "—"))).sort();
+  }, [rows]);
+
+  // ✅ Resolve machine scope from query params
+  useEffect(() => {
+    // If machineId is provided and valid -> lock to it
+    if (machineIdParam) {
+      const idNum = Number(machineIdParam);
+      if (Number.isFinite(idNum)) {
+        setMachineLocked(true);
+        setFilterMachineId(idNum);
+
+        // Try to set label from existing machine options (if cycles already loaded)
+        const label = machineOptions.find((m) => m.id === idNum)?.name;
+        if (label) setLockedMachineLabel(label);
+      } else {
+        setMachineLocked(false);
+        setLockedMachineLabel("");
+        setFilterMachineId("ALL");
+      }
+      return;
+    }
+
+    // Legacy: if machine name is provided, map it to an id using loaded cycles
+    if (machineNameParam) {
+      const match = machineOptions.find((m) => m.name === machineNameParam);
+      if (match) {
+        setMachineLocked(true);
+        setFilterMachineId(match.id);
+        setLockedMachineLabel(match.name);
+
+        // Normalize URL to machineId form
+        const newParams = new URLSearchParams(params);
+        newParams.set("machineId", String(match.id));
+        newParams.delete("device");
+        // keep "machine" for readability if you want:
+        newParams.set("machine", match.name);
+        setParams(newParams, { replace: true });
+      } else {
+        // name didn't match any loaded cycles; leave unlocked
+        setMachineLocked(false);
+        setLockedMachineLabel("");
+        setFilterMachineId("ALL");
+      }
+      return;
+    }
+
+    // No scope parameters => normal view
+    setMachineLocked(false);
+    setLockedMachineLabel("");
+    setFilterMachineId("ALL");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [machineIdParam, machineNameParam, machineOptions.length]);
 
   const filtered = useMemo(() => {
     return rows.filter((r) => {
-      if (filterDevice !== "ALL" && r.machine !== filterDevice) return false;
+      if (filterMachineId !== "ALL" && r.machineId !== filterMachineId) return false;
       if (filterProgram !== "ALL" && r.program !== filterProgram) return false;
 
       if (fromDate && r.start) {
@@ -109,38 +168,46 @@ export default function WashCycles() {
 
       return true;
     });
-  }, [rows, filterDevice, filterProgram, fromDate, toDate]);
+  }, [rows, filterMachineId, filterProgram, fromDate, toDate]);
 
-  function setDeviceFilter(next: string) {
-    setFilterDevice(next);
+  function setMachineFilter(next: number | "ALL") {
+    // If locked, don't allow changing via UI
+    if (machineLocked) return;
+
+    setFilterMachineId(next);
 
     const newParams = new URLSearchParams(params);
-    if (next === "ALL") newParams.delete("device");
-    else newParams.set("device", next);
+
+    if (next === "ALL") {
+      newParams.delete("machineId");
+      newParams.delete("device");
+      newParams.delete("machine");
+    } else {
+      const label = machineOptions.find((m) => m.id === next)?.name;
+      newParams.set("machineId", String(next));
+      newParams.delete("device");
+      if (label) newParams.set("machine", label);
+      else newParams.delete("machine");
+    }
+
     setParams(newParams, { replace: true });
   }
 
   // ✅ AUTHENTICATED XML DOWNLOAD
   async function downloadXml(cycleId: number) {
     try {
-      const response = await api.get(
-        `/v1/washer-cycles/${cycleId}/download`,
-        { responseType: "blob" }
-      );
-
-      const blob = new Blob([response.data], {
-        type: "application/xml",
+      const response = await api.get(`/v1/washer-cycles/${cycleId}/download`, {
+        responseType: "blob",
       });
 
+      const blob = new Blob([response.data], { type: "application/xml" });
       const url = window.URL.createObjectURL(blob);
 
       let filename = "cycle.xml";
-      const disposition = response.headers["content-disposition"];
+      const disposition = (response.headers as any)["content-disposition"];
       if (disposition) {
         const match = disposition.match(/filename="?([^"]+)"?/);
-        if (match?.[1]) {
-          filename = match[1];
-        }
+        if (match?.[1]) filename = match[1];
       }
 
       const a = document.createElement("a");
@@ -148,7 +215,6 @@ export default function WashCycles() {
       a.download = filename;
       document.body.appendChild(a);
       a.click();
-
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
     } catch (err) {
@@ -170,22 +236,31 @@ export default function WashCycles() {
     }
   }
 
+  const displayMachineLabel =
+    lockedMachineLabel ||
+    (filterMachineId !== "ALL"
+      ? machineOptions.find((m) => m.id === filterMachineId)?.name ?? ""
+      : "");
+
+  const titleSuffix =
+    machineLocked && displayMachineLabel ? ` – ${displayMachineLabel.trim()}` : "";
+
   return (
     <div className="container py-4">
       {/* Header */}
       <div className="d-flex align-items-center justify-content-between mb-3">
         <div>
-          <h1 className="h4 mb-0">Cycles</h1>
-          <div className="text-secondary small">
-            Parsed cycles appear immediately.
-          </div>
-          {statusMsg && (
-            <div className="text-secondary small mt-1">{statusMsg}</div>
-          )}
+          <h1 className="h4 mb-0">Cycles{titleSuffix}</h1>
+          <div className="text-secondary small">Parsed cycles appear immediately.</div>
+          {statusMsg && <div className="text-secondary small mt-1">{statusMsg}</div>}
         </div>
 
         <Link
-          to="/wash-cycles/upload"
+          to={
+            filterMachineId !== "ALL"
+              ? `/wash-cycles/upload?machineId=${encodeURIComponent(String(filterMachineId))}`
+              : "/wash-cycles/upload"
+          }
           className="btn btn-primary btn-sm d-flex align-items-center gap-1"
         >
           <i className="bi bi-upload" />
@@ -196,17 +271,24 @@ export default function WashCycles() {
       {/* Filters */}
       <div className="d-flex flex-wrap gap-3 mb-3 align-items-end">
         <div>
-          <label className="form-label small">Machine</label>
+          <label className="form-label small">
+            Machine{" "}
+            {machineLocked ? <span className="text-secondary">(locked)</span> : null}
+          </label>
           <select
-            value={filterDevice}
-            onChange={(e) => setDeviceFilter(e.target.value)}
+            value={filterMachineId === "ALL" ? "ALL" : String(filterMachineId)}
+            onChange={(e) => {
+              const v = e.target.value;
+              setMachineFilter(v === "ALL" ? "ALL" : Number(v));
+            }}
             className="form-select form-select-sm"
-            style={{ minWidth: 200 }}
+            style={{ minWidth: 240 }}
+            disabled={machineLocked}
           >
             <option value="ALL">All machines</option>
             {machineOptions.map((m) => (
-              <option key={m} value={m}>
-                {m}
+              <option key={m.id} value={String(m.id)}>
+                {m.name}
               </option>
             ))}
           </select>
@@ -248,6 +330,14 @@ export default function WashCycles() {
             className="form-control form-control-sm"
           />
         </div>
+
+        {machineLocked && (
+          <div className="ms-auto">
+            <Link to="/wash-cycles" className="btn btn-outline-secondary btn-sm">
+              Exit machine view
+            </Link>
+          </div>
+        )}
       </div>
 
       {/* Table */}
@@ -269,7 +359,7 @@ export default function WashCycles() {
               {filtered.map((r) => (
                 <tr key={r.id}>
                   <td>{r.cycleNo ? `#${r.cycleNo}` : "—"}</td>
-                  <td>{r.machine}</td>
+                  <td>{r.machineName}</td>
                   <td>{r.program}</td>
                   <td>{formatDateTime(r.start)}</td>
                   <td>{formatDateTime(r.end)}</td>
@@ -288,10 +378,7 @@ export default function WashCycles() {
                   </td>
                   <td className="text-end">
                     <div className="d-inline-flex gap-2">
-                      <Link
-                        to={`/wash-cycles/${r.id}`}
-                        className="btn btn-primary btn-sm"
-                      >
+                      <Link to={`/wash-cycles/${r.id}`} className="btn btn-primary btn-sm">
                         View details
                       </Link>
                       <button
@@ -335,3 +422,4 @@ export default function WashCycles() {
     </div>
   );
 }
+``

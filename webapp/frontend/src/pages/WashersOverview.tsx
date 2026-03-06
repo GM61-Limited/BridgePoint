@@ -9,9 +9,11 @@ import {
   getMachineTypes,
   type IntegrationProfile,
   listMachines,
+  listWasherCycles,
   type Machine,
   type MachineType,
   updateMachine,
+  type WasherCycle,
 } from "../lib/api";
 
 type Chip = "All" | "Enabled" | "Disabled";
@@ -19,16 +21,7 @@ type Chip = "All" | "Enabled" | "Disabled";
 /**
  * Connectivity badge
  * ------------------
- * You explicitly want:
- * - Grey for file-based/non-live devices (cycle files uploaded/received at end of cycle)
- * - Reserve green/red for future real-time integrated devices (online/offline heartbeat)
- *
- * Right now we do NOT have heartbeat data, so we intentionally do NOT show green/red.
- * We therefore show "Offline (file-based)" for all machines for now.
- *
- * Later, when you add live integration, we can switch based on:
- * - a new DB field e.g. integration_mode: 'file' | 'live'
- * - and a heartbeat/last_seen field for live devices.
+ * Grey for file-based/non-live devices.
  */
 function ConnectivityBadge(_machine: Machine) {
   return (
@@ -72,16 +65,29 @@ function safeStr(v: unknown) {
 }
 
 /**
- * MVP placeholder summary for "last known cycle".
- * For now we always show '--' because we haven't implemented cycle ingestion yet.
- * Later we will replace this with real data from the backend.
+ * Build a map: machine_id -> latest cycle summary
+ * We treat "latest" as the first occurrence per machine in the
+ * already-sorted-by-started_at-desc washer-cycles response.
  */
-function getLastCycleSummary(_machine: Machine): { cycleNo: string; operator: string; program: string } {
-  return {
-    cycleNo: "--",
-    operator: "--",
-    program: "--",
-  };
+function buildLastCycleMap(cycles: WasherCycle[]): Map<number, { cycleNo: string; program: string }> {
+  const m = new Map<number, { cycleNo: string; program: string }>();
+
+  for (const c of cycles) {
+    // only set once (first == newest)
+    if (m.has(c.machine_id)) continue;
+
+    const cycleNo =
+      c.cycle_number === null || c.cycle_number === undefined ? "--" : String(c.cycle_number);
+
+    const program =
+      c.program_name === null || c.program_name === undefined || c.program_name === ""
+        ? "--"
+        : String(c.program_name);
+
+    m.set(c.machine_id, { cycleNo, program });
+  }
+
+  return m;
 }
 
 type MachineFormState = {
@@ -140,10 +146,14 @@ export default function WashersOverview() {
   const [machineTypes, setMachineTypes] = useState<MachineType[]>([]);
   const [integrationProfiles, setIntegrationProfiles] = useState<IntegrationProfile[]>([]);
 
+  // ✅ Last-cycle map from washer cycles
+  const [lastByMachineId, setLastByMachineId] = useState<Map<number, { cycleNo: string; program: string }>>(
+    () => new Map()
+  );
+
   // Filters
   const [query, setQuery] = useState<string>("");
-  // Empty string means "All types"
-  const [typeKey, setTypeKey] = useState<string>(""); // default: all machines
+  const [typeKey, setTypeKey] = useState<string>(""); // all types
   const [manufacturer, setManufacturer] = useState<string>("");
   const [chip, setChip] = useState<Chip>("All");
 
@@ -160,6 +170,7 @@ export default function WashersOverview() {
     async function load() {
       setLoading(true);
       setErr("");
+
       try {
         const [types, profiles] = await Promise.all([getMachineTypes(), getIntegrationProfiles()]);
         if (!alive) return;
@@ -167,10 +178,12 @@ export default function WashersOverview() {
         setMachineTypes(types);
         setIntegrationProfiles(profiles);
 
-        // IMPORTANT: load ALL machines (washers + sterilisers + others)
-        const items = await listMachines();
+        // Load machines + cycles in parallel (frontend-only enrichment)
+        const [items, cycles] = await Promise.all([listMachines(), listWasherCycles()]);
         if (!alive) return;
+
         setMachines(items);
+        setLastByMachineId(buildLastCycleMap(cycles));
       } catch (e: any) {
         if (!alive) return;
         setErr(e?.message || "Failed to load machines");
@@ -185,12 +198,12 @@ export default function WashersOverview() {
     };
   }, []);
 
-  async function refreshMachines() {
+  async function refreshMachinesAndLast() {
     setErr("");
     try {
-      // IMPORTANT: refresh ALL machines
-      const items = await listMachines();
+      const [items, cycles] = await Promise.all([listMachines(), listWasherCycles()]);
       setMachines(items);
+      setLastByMachineId(buildLastCycleMap(cycles));
     } catch (e: any) {
       setErr(e?.message || "Failed to refresh machines");
     }
@@ -234,7 +247,6 @@ export default function WashersOverview() {
 
   function openCreate() {
     setEditingId(null);
-    // If user is filtered to a type, prefill that type; otherwise default to washer
     setForm({ ...emptyForm, machine_type: typeKey || "washer" });
     setErr("");
     setShowModal(true);
@@ -306,7 +318,7 @@ export default function WashersOverview() {
       else await updateMachine(editingId, payload);
 
       setShowModal(false);
-      await refreshMachines();
+      await refreshMachinesAndLast();
     } catch (e: any) {
       setErr(e?.message || "Failed to save machine");
     } finally {
@@ -318,7 +330,7 @@ export default function WashersOverview() {
     setErr("");
     try {
       await deactivateMachine(id);
-      await refreshMachines();
+      await refreshMachinesAndLast();
     } catch (e: any) {
       setErr(e?.message || "Failed to disable machine");
     }
@@ -338,12 +350,7 @@ export default function WashersOverview() {
           <button className="btn btn-primary btn-sm" onClick={openCreate}>
             + Add machine
           </button>
-          <Link to="/wash-cycles" className="btn btn-outline-secondary btn-sm">
-            Cycles
-          </Link>
-          <Link to="/wash-cycles/upload" className="btn btn-outline-secondary btn-sm">
-            Upload cycles
-          </Link>
+          {/* ✅ Removed top shortcut to Cycles (already in nav + per machine) */}
         </div>
       </div>
 
@@ -434,7 +441,7 @@ export default function WashersOverview() {
               Enabled
             </button>
             <button
-              className={`btn ${chip === "Disabled" ? "btn-outline-secondary" : "btn-outline-secondary"}`}
+              className="btn btn-outline-secondary"
               onClick={() => setChip("Disabled")}
             >
               Disabled
@@ -466,11 +473,9 @@ export default function WashersOverview() {
           filtered.map((m) => {
             const host =
               m.hostname || (m.ip_address ? `${m.ip_address}${m.port ? `:${m.port}` : ""}` : "—");
-            const sub = `${m.manufacturer ? m.manufacturer : "Unknown manufacturer"}${
-              m.model ? ` • ${m.model}` : ""
-            }`;
+            const sub = `${m.manufacturer ? m.manufacturer : "Unknown manufacturer"}${m.model ? ` • ${m.model}` : ""}`;
 
-            const last = getLastCycleSummary(m);
+            const last = lastByMachineId.get(m.id) ?? { cycleNo: "--", program: "--" };
 
             return (
               <div key={m.id} className="col-12 col-sm-6 col-xl-4 d-flex">
@@ -485,25 +490,20 @@ export default function WashersOverview() {
                         </div>
                       </div>
 
-                      {/* Connectivity + enabled */}
                       <div className="d-flex flex-column align-items-end gap-1">
                         <ConnectivityBadge {...m} />
                         <EnabledPill enabled={m.is_active} />
                       </div>
                     </div>
 
-                    {/* --- Last cycle summary (placeholders for now) --- */}
+                    {/* ✅ Last cycle & program (derived from washer cycles) */}
                     <div className="mt-3 small">
                       <div className="d-flex justify-content-between">
                         <span className="text-secondary">Last cycle</span>
                         <span className="text-body fw-semibold">{last.cycleNo}</span>
                       </div>
                       <div className="d-flex justify-content-between">
-                        <span className="text-secondary">Operator</span>
-                        <span className="text-body">{last.operator}</span>
-                      </div>
-                      <div className="d-flex justify-content-between">
-                        <span className="text-secondary">Program</span>
+                        <span className="text-secondary">Last program</span>
                         <span className="text-body">{last.program}</span>
                       </div>
                     </div>
@@ -548,12 +548,23 @@ export default function WashersOverview() {
                         </button>
                       </div>
 
-                      <Link
-                        to={`/wash-cycles?device=${encodeURIComponent(String(m.id))}`}
-                        className="btn btn-outline-secondary btn-sm"
-                      >
-                        Cycles
-                      </Link>
+                      <div className="d-flex gap-2">
+                        <Link
+                          to={`/wash-cycles/upload?machineId=${encodeURIComponent(String(m.id))}`}
+                          className="btn btn-outline-primary btn-sm"
+                          title="Upload cycles for this machine"
+                        >
+                          Upload
+                        </Link>
+
+                        <Link
+                          to={`/wash-cycles?machineId=${encodeURIComponent(String(m.id))}`}
+                          className="btn btn-outline-secondary btn-sm"
+                          title="View cycles for this machine"
+                        >
+                          Cycles
+                        </Link>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -562,7 +573,7 @@ export default function WashersOverview() {
           })}
       </div>
 
-      {/* Modal */}
+      {/* Modal (unchanged) */}
       {showModal && (
         <>
           <div className="modal show" style={{ display: "block" }} role="dialog" aria-modal="true">

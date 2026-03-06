@@ -375,8 +375,7 @@ ON CONFLICT (name) DO NOTHING;
 
 -- 2) Seed machine types
 INSERT INTO machine_types (key, display_name, description, is_active) VALUES
-('washer',     'Washer',     'Washer / washer-disinfector devices', TRUE),
-('steriliser', 'Steriliser', 'Steriliser / autoclave devices', TRUE)
+('washer',     'Washer',     'Washer / washer-disinfector devices', TRUE)
 ON CONFLICT (key) DO NOTHING;
 
 -- 3) Seed integration profiles
@@ -447,36 +446,36 @@ CROSS JOIN (
 ON CONFLICT (environment_id, module_key) DO NOTHING;
 
 -- 7) Seed example machines (optional)
--- Test Company (env 1)
-INSERT INTO machines (environment_id, machine_name, machine_code, machine_type, manufacturer, model, ip_address, port, protocol, location, timezone)
-SELECT 1, 'Washer A', 'WD-TEST-01', 'washer', 'MMM', 'Unknown', '192.168.10.10'::inet, 80, 'http', 'Test Room', 'Europe/London'
-WHERE NOT EXISTS (SELECT 1 FROM machines WHERE environment_id = 1 AND machine_code = 'WD-TEST-01');
-
-INSERT INTO machines (environment_id, machine_name, machine_code, machine_type, manufacturer, model, ip_address, port, protocol, location, timezone)
-SELECT 1, 'Steriliser A', 'ST-TEST-01', 'steriliser', 'Getinge', 'Unknown', '192.168.10.20'::inet, 80, 'http', 'Test Room', 'Europe/London'
-WHERE NOT EXISTS (SELECT 1 FROM machines WHERE environment_id = 1 AND machine_code = 'ST-TEST-01');
 
 -- GM61 (env 2)
 INSERT INTO machines (environment_id, machine_name, machine_code, machine_type, manufacturer, model, ip_address, port, protocol, location, timezone)
-SELECT 2, 'Washer 1', 'WD-GM61-01', 'washer', 'MMM', 'Unknown', '192.168.20.10'::inet, 80, 'http', 'Decontam Room', 'Europe/London'
-WHERE NOT EXISTS (SELECT 1 FROM machines WHERE environment_id = 2 AND machine_code = 'WD-GM61-01');
+SELECT 2, 'Washer 1', 'SO-MMM-1', 'washer', 'MMM', 'Uniclean PLII 15-2 FD', '192.168.20.10'::inet, 80, 'http', 'IHSS Southampton', 'Europe/London'
+WHERE NOT EXISTS (SELECT 1 FROM machines WHERE environment_id = 2 AND machine_code = 'SO-MMM-1');
 
 INSERT INTO machines (environment_id, machine_name, machine_code, machine_type, manufacturer, model, ip_address, port, protocol, location, timezone)
-SELECT 2, 'Washer 2', 'WD-GM61-02', 'washer', 'MMM', 'Unknown', '192.168.20.11'::inet, 80, 'http', 'Decontam Room', 'Europe/London'
-WHERE NOT EXISTS (SELECT 1 FROM machines WHERE environment_id = 2 AND machine_code = 'WD-GM61-02');
+SELECT 2, 'Washer 2', 'SO-MMM-2', 'washer', 'MMM', 'Uniclean PLII 15-2 FD', '192.168.20.11'::inet, 80, 'http', 'IHSS Southampton', 'Europe/London'
+WHERE NOT EXISTS (SELECT 1 FROM machines WHERE environment_id = 2 AND machine_code = 'SO-MMM-2');
 
 INSERT INTO machines (environment_id, machine_name, machine_code, machine_type, manufacturer, model, ip_address, port, protocol, location, timezone)
-SELECT 2, 'Steriliser 1', 'ST-GM61-01', 'steriliser', 'Tuttnauer', 'Unknown', '192.168.20.30'::inet, 80, 'http', 'Sterile Area', 'Europe/London'
-WHERE NOT EXISTS (SELECT 1 FROM machines WHERE environment_id = 2 AND machine_code = 'ST-GM61-01');
-
--- IHSS (env 3)
-INSERT INTO machines (environment_id, machine_name, machine_code, machine_type, manufacturer, model, ip_address, port, protocol, location, timezone)
-SELECT 3, 'Washer 1', 'WD-IHSS-01', 'washer', 'MMM', 'Unknown', '192.168.30.10'::inet, 80, 'http', 'Decontam', 'Europe/London'
-WHERE NOT EXISTS (SELECT 1 FROM machines WHERE environment_id = 3 AND machine_code = 'WD-IHSS-01');
+SELECT 2, 'Washer 3', 'SO-MMM-3', 'washer', 'MMM', 'Uniclean PLII 15-2 FD', '192.168.20.12'::inet, 80, 'http', 'IHSS Southampton', 'Europe/London'
+WHERE NOT EXISTS (SELECT 1 FROM machines WHERE environment_id = 2 AND machine_code = 'SO-MMM-3');
 
 INSERT INTO machines (environment_id, machine_name, machine_code, machine_type, manufacturer, model, ip_address, port, protocol, location, timezone)
-SELECT 3, 'Steriliser 1', 'ST-IHSS-01', 'steriliser', 'Getinge', 'Unknown', '192.168.30.20'::inet, 80, 'http', 'Sterile Area', 'Europe/London'
-WHERE NOT EXISTS (SELECT 1 FROM machines WHERE environment_id = 3 AND machine_code = 'ST-IHSS-01');
+SELECT 2, 'Washer 4', 'SO-MMM-4', 'washer', 'MMM', 'Uniclean PLII 15-2 FD', '192.168.20.13'::inet, 80, 'http', 'IHSS Southampton', 'Europe/London'
+WHERE NOT EXISTS (SELECT 1 FROM machines WHERE environment_id = 2 AND machine_code = 'SO-MMM-4');
+
+INSERT INTO machines (environment_id, machine_name, machine_code, machine_type, manufacturer, model, ip_address, port, protocol, location, timezone)
+SELECT 2, 'Washer 5', 'SO-MMM-5', 'washer', 'MMM', 'Uniclean PLII 15-2 FD', '192.168.20.14'::inet, 80, 'http', 'IHSS Southampton', 'Europe/London'
+WHERE NOT EXISTS (SELECT 1 FROM machines WHERE environment_id = 2 AND machine_code = 'SO-MMM-5');
+
+INSERT INTO machines (environment_id, machine_name, machine_code, machine_type, manufacturer, model, ip_address, port, protocol, location, timezone)
+SELECT 2, 'Washer 6', 'SO-MMM-6', 'washer', 'MMM', 'Uniclean PLII 15-2 FD', '192.168.20.15'::inet, 80, 'http', 'IHSS Southampton', 'Europe/London'
+WHERE NOT EXISTS (SELECT 1 FROM machines WHERE environment_id = 2 AND machine_code = 'SO-MMM-6');
+
+INSERT INTO machines (environment_id, machine_name, machine_code, machine_type, manufacturer, model, ip_address, port, protocol, location, timezone)
+SELECT 2, 'Washer 7', 'SO-MMM-7', 'washer', 'MMM', 'Uniclean PLII 15-2 FD', '192.168.20.16'::inet, 80, 'http', 'IHSS Southampton', 'Europe/London'
+WHERE NOT EXISTS (SELECT 1 FROM machines WHERE environment_id = 2 AND machine_code = 'SO-MMM-7');
+
 
 -- 8) Seed sensor types
 INSERT INTO sensor_types (code, unit, description) VALUES
