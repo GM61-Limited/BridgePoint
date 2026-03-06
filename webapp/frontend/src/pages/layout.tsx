@@ -195,6 +195,17 @@ export default function Layout() {
                 <span className="sidebar-label">Health</span>
               </NavLink>
 
+              {/* ✅ NEW: Maintenance */}
+              <NavLink
+                to="/machines/maintenance"
+                end
+                title={collapsed ? "Maintenance" : undefined}
+                className={({ isActive }) => navClass(isActive)}
+              >
+                <i className={iconCls("bi-wrench-adjustable")} aria-hidden="true" />
+                <span className="sidebar-label">Maintenance</span>
+              </NavLink>
+
               {/* Cycles */}
               {/* NOTE: we intentionally DO NOT use `end` here,
                  so Cycles stays highlighted for /wash-cycles/:id and /wash-cycles/upload */}

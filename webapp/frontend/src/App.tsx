@@ -24,8 +24,11 @@ import WashersOverview from "./pages/WashersOverview";
 // ✅ Machine Monitoring Dashboard
 import MachinesDashboard from "./pages/MachinesDashboard";
 
-// ✅ NEW: Health (Predictive / Maintenance placeholder)
+// ✅ Health (Predictive / Maintenance placeholder)
 import Health from "./pages/Health";
+
+// ✅ NEW: Maintenance placeholder page
+import Maintenance from "./pages/Maintenance";
 
 // Connectors
 import Connectors from "./pages/connectors";
@@ -144,12 +147,22 @@ export default function App() {
               }
             />
 
-            {/* ✅ NEW: Health (Preview) */}
+            {/* ✅ Health (Preview) */}
             <Route
               path="machines/health"
               element={
                 <RequireModule module="machine-monitoring">
                   <Health />
+                </RequireModule>
+              }
+            />
+
+            {/* ✅ NEW: Maintenance (Preview/Audit log) */}
+            <Route
+              path="machines/maintenance"
+              element={
+                <RequireModule module="machine-monitoring">
+                  <Maintenance />
                 </RequireModule>
               }
             />
@@ -239,9 +252,6 @@ export default function App() {
                 </RequireModule>
               }
             />
-
-            {/* ✅ Alerts route removed (retired for now)
-                If you want to keep it for later, you can re-add it easily. */}
 
             {/* Finance */}
             <Route

@@ -1,6 +1,5 @@
 // src/pages/Settings.tsx
-import React, { useEffect, useMemo, useState } from "react";
-import { NavLink } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../features/auth/AuthContext";
 import { useModules } from "../features/modules/ModulesContext";
 
@@ -12,11 +11,10 @@ export type Organization = {
   id: string | number; // backend env id is numeric; tolerate string here
   name: string;
   domain: string;
-  address?: string;
-  timezone?: string;
+  // address/timezone intentionally removed (not wired)
 };
 
-export type OrgUpdate = Partial<Pick<Organization, "name" | "domain" | "address" | "timezone">>;
+export type OrgUpdate = Partial<Pick<Organization, "name" | "domain">>;
 
 export type UserRow = {
   id: string;
@@ -26,13 +24,6 @@ export type UserRow = {
   email: string;
   role: "admin" | "editor" | "viewer"; // mapped from "Admin" | "Editor" | "Viewer"
   active: boolean; // mapped from backend "is_active"
-};
-
-export type ConnectionSummary = {
-  total: number;
-  active: number;
-  failed: number;
-  lastUpdated?: string;
 };
 
 export type AppInfo = {
@@ -61,7 +52,7 @@ const DEFAULT_MODULES: ModuleRow[] = [
   {
     key: "machine-monitoring",
     name: "Machine Monitoring",
-    description: "Washers and device telemetry (MMM uploads, cycle graphs, history).",
+    description: "Washers and device telemetry (uploads, cycle graphs, history).",
     enabled: true,
   },
   {
@@ -89,14 +80,6 @@ const DEFAULT_MODULES: ModuleRow[] = [
     enabled: false,
   },
 ];
-
-/** --- Connections placeholder only (backend not built yet) --- */
-const PLACEHOLDER_SUMMARY: ConnectionSummary = {
-  total: 5,
-  active: 4,
-  failed: 1,
-  lastUpdated: new Date().toISOString(),
-};
 
 /** --- Helpers (headers, errors, role mapping, env id) --- */
 function authHeaders(token: string | null) {
@@ -254,9 +237,11 @@ export default function Settings() {
   const [error, setError] = useState<string | null>(null);
 
   const [org, setOrg] = useState<Organization | null>(null);
+
   const [users, setUsers] = useState<UserRow[]>([]);
-  const [usersDraft, setUsersDraft] = useState<UserRow[]>([]); // parent-level draft list
-  const [bulkSaving, setBulkSaving] = useState(false); // disable inputs while bulk saving
+  const [usersDraft, setUsersDraft] = useState<UserRow[]>([]);
+  const [bulkSaving, setBulkSaving] = useState(false);
+
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
 
   // Organization edit state
@@ -265,21 +250,21 @@ export default function Settings() {
   const [orgEditing, setOrgEditing] = useState(false);
 
   // Users edit/add state
-  const [userSaving, setUserSaving] = useState<string | null>(null); // used for per-row operations (e.g., reset pw)
+  const [userSaving, setUserSaving] = useState<string | null>(null);
   const [userAdding, setUserAdding] = useState(false);
 
   // Users pagination/show-more
   const DEFAULT_VISIBLE = 5;
   const [usersVisible, setUsersVisible] = useState<number>(DEFAULT_VISIBLE);
 
-  // Connections (placeholder)
-  const [summary, setSummary] = useState<ConnectionSummary | null>(PLACEHOLDER_SUMMARY);
-
   // Modules (DB-backed with fallback)
-  const [modules, setModules] = useState<ModuleRow[]>([]); // UI draft
+  const [modules, setModules] = useState<ModuleRow[]>([]);
   const [modulesSaving, setModulesSaving] = useState(false);
   const [modulesDirty, setModulesDirty] = useState(false);
   const [modulesSource, setModulesSource] = useState<"api" | "local">("local");
+
+  // UI: last refreshed timestamp (replaces the old Connections placeholder "last updated")
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<string>(() => new Date().toISOString());
 
   const baseHeaders = useMemo(() => authHeaders(token), [token]);
 
@@ -396,7 +381,11 @@ export default function Settings() {
           return { data: fromLocal, source: "local" as const };
         })();
 
-        const [usersData, versionData, modulesData] = await Promise.all([usersPromise, versionPromise, modulesPromise]);
+        const [usersData, versionData, modulesData] = await Promise.all([
+          usersPromise,
+          versionPromise,
+          modulesPromise,
+        ]);
 
         if (!cancelled) {
           setOrg(orgData);
@@ -405,16 +394,12 @@ export default function Settings() {
           setUsersVisible(DEFAULT_VISIBLE);
           setAppInfo(versionData);
 
-          setSummary((prev) => {
-            const base = prev ?? PLACEHOLDER_SUMMARY;
-            return { ...base, lastUpdated: new Date().toISOString() };
-          });
-
           setModules(modulesData.data);
           setModulesSource(modulesData.source);
           setModulesDirty(false);
 
           setOrgEdit({});
+          setLastRefreshedAt(new Date().toISOString());
           setLoading(false);
         }
       } catch (e) {
@@ -440,8 +425,6 @@ export default function Settings() {
     setOrgEdit({
       name: org.name,
       domain: org.domain,
-      address: org.address ?? "",
-      timezone: org.timezone ?? "",
     });
   }
   function cancelOrgEdit() {
@@ -551,6 +534,7 @@ export default function Settings() {
       setUsersDraft(normalized.map((u) => ({ ...u })));
       setUsersVisible(DEFAULT_VISIBLE);
       setError(null);
+      setLastRefreshedAt(new Date().toISOString());
     } catch (err: any) {
       setError(err?.message ?? "Failed to refresh users.");
     }
@@ -598,6 +582,7 @@ export default function Settings() {
         }
       }
       setUsersDraft((prev) => prev.map((u) => ({ ...u })));
+      setLastRefreshedAt(new Date().toISOString());
     } catch (err: any) {
       setError(err?.message ?? "Failed to save user changes.");
     } finally {
@@ -633,9 +618,10 @@ export default function Settings() {
         setModulesSource("api");
         setModulesDirty(false);
 
-        // ✅ KEY FIX: refresh module config so nav + guards update immediately
+        // ✅ refresh module config so nav + guards update immediately
         await reload();
 
+        setLastRefreshedAt(new Date().toISOString());
         return;
       }
 
@@ -645,6 +631,7 @@ export default function Settings() {
       setModulesDirty(false);
 
       setError((prev) => prev ?? "Saved locally (API not available yet).");
+      setLastRefreshedAt(new Date().toISOString());
     } catch (err: any) {
       setError(err?.message ?? "Failed to save modules.");
     } finally {
@@ -665,6 +652,40 @@ export default function Settings() {
     setUsersVisible(DEFAULT_VISIBLE);
   }
 
+  /** --- About: copy diagnostics --- */
+  async function copyDiagnostics() {
+    const lines: string[] = [];
+
+    lines.push("BridgePoint diagnostics");
+    lines.push("----------------------");
+
+    if (appInfo?.version) lines.push(`Version: ${appInfo.version}`);
+    if (appInfo?.commit) lines.push(`Commit: ${String(appInfo.commit).slice(0, 12)}`);
+    if (appInfo?.buildTime) lines.push(`Built: ${appInfo.buildTime}`);
+
+    lines.push(`API Base: ${API_BASE}`);
+
+    if (org) {
+      lines.push(`Environment: ${org.name}`);
+      lines.push(`Environment ID: ${org.id}`);
+      lines.push(`Domain: ${org.domain}`);
+    }
+
+    lines.push(`Generated: ${new Date().toISOString()}`);
+
+    const text = lines.join("\n");
+
+    try {
+      await navigator.clipboard.writeText(text);
+      setError("Copied diagnostics to clipboard.");
+      setTimeout(() => setError(null), 1200);
+    } catch {
+      // fallback: show message only
+      setError("Could not copy to clipboard (browser permissions).");
+      setTimeout(() => setError(null), 1800);
+    }
+  }
+
   /** --- Render --- */
   if (loading) {
     return (
@@ -681,7 +702,7 @@ export default function Settings() {
       <div className="d-flex align-items-center justify-content-between mb-3">
         <h2 className="m-0">Settings</h2>
         <div className="text-muted small">
-          {summary?.lastUpdated ? <>Last updated: {new Date(summary.lastUpdated).toLocaleString()}</> : null}
+          Last refreshed: {new Date(lastRefreshedAt).toLocaleString()}
         </div>
       </div>
 
@@ -693,34 +714,74 @@ export default function Settings() {
 
       {/* About BridgePoint */}
       <div className="card mb-3">
-        <div className="card-header d-flex align-items-center gap-2">
-          <i className="bi bi-info-circle" aria-hidden="true" />
-          <strong>About BridgePoint</strong>
+        <div className="card-header d-flex align-items-center justify-content-between">
+          <div className="d-flex align-items-center gap-2">
+            <i className="bi bi-info-circle" aria-hidden="true" />
+            <strong>About BridgePoint</strong>
+          </div>
+
+          <button className="btn btn-sm btn-outline-secondary" onClick={copyDiagnostics}>
+            <i className="bi bi-clipboard" aria-hidden="true" /> Copy diagnostics
+          </button>
         </div>
+
         <div className="card-body">
           {!appInfo ? (
             <div className="text-muted">Version information not available.</div>
           ) : (
-            <div className="row g-3">
-              <div className="col-md-4">
-                <div className="text-muted small">Version</div>
-                <div className="fw-semibold">{appInfo.version}</div>
-              </div>
-              {appInfo.commit ? (
-                <div className="col-md-4">
+            <>
+              <div className="row g-3">
+                <div className="col-md-3">
+                  <div className="text-muted small">Version</div>
+                  <div className="fw-semibold">{appInfo.version}</div>
+                </div>
+
+                <div className="col-md-3">
                   <div className="text-muted small">Commit</div>
                   <div className="fw-semibold">
-                    <code>{appInfo.commit.slice(0, 7)}</code>
+                    {appInfo.commit ? <code>{String(appInfo.commit).slice(0, 7)}</code> : <span className="text-muted">—</span>}
                   </div>
                 </div>
-              ) : null}
-              {appInfo.buildTime ? (
-                <div className="col-md-4">
+
+                <div className="col-md-3">
                   <div className="text-muted small">Built</div>
-                  <div className="fw-semibold">{new Date(appInfo.buildTime).toLocaleString()}</div>
+                  <div className="fw-semibold">
+                    {appInfo.buildTime ? new Date(appInfo.buildTime).toLocaleString() : <span className="text-muted">—</span>}
+                  </div>
                 </div>
-              ) : null}
-            </div>
+
+                <div className="col-md-3">
+                  <div className="text-muted small">API Base</div>
+                  <div className="fw-semibold">
+                    <code>{API_BASE}</code>
+                  </div>
+                </div>
+              </div>
+
+              <hr />
+
+              <div className="row g-3">
+                <div className="col-md-4">
+                  <div className="text-muted small">Environment</div>
+                  <div className="fw-semibold">{org?.name ?? "—"}</div>
+                </div>
+
+                <div className="col-md-4">
+                  <div className="text-muted small">Environment ID</div>
+                  <div className="fw-semibold">{org?.id ?? "—"}</div>
+                </div>
+
+                <div className="col-md-4">
+                  <div className="text-muted small">Domain</div>
+                  <div className="fw-semibold">{org?.domain ?? "—"}</div>
+                </div>
+              </div>
+
+              <div className="text-muted small mt-3">
+                Tip: If <code>/version</code> isn’t available, you can set build metadata via Vite env vars:
+                <code className="ms-1">VITE_APP_VERSION</code>, <code>VITE_GIT_SHA</code>, <code>VITE_BUILD_TIME</code>.
+              </div>
+            </>
           )}
         </div>
       </div>
@@ -732,6 +793,7 @@ export default function Settings() {
             <i className="bi bi-buildings" aria-hidden="true" />
             <strong>Organization</strong>
           </div>
+
           {!orgEditing ? (
             <button className="btn btn-sm btn-outline-primary" onClick={startOrgEdit} disabled={!org}>
               <i className="bi bi-pencil" aria-hidden="true" /> Edit
@@ -747,6 +809,7 @@ export default function Settings() {
             </div>
           )}
         </div>
+
         <div className="card-body">
           {!org ? (
             <div className="text-muted">No organization data.</div>
@@ -761,6 +824,7 @@ export default function Settings() {
                   disabled={!orgEditing}
                 />
               </div>
+
               <div className="col-md-6">
                 <label className="form-label">Domain</label>
                 <input
@@ -770,24 +834,8 @@ export default function Settings() {
                   disabled={!orgEditing}
                 />
               </div>
-              <div className="col-md-8">
-                <label className="form-label">Address</label>
-                <input
-                  className="form-control"
-                  value={orgEditing ? orgEdit.address ?? "" : (org as any).address ?? ""}
-                  onChange={(e) => setOrgEdit((p) => ({ ...p, address: e.target.value }))}
-                  disabled={!orgEditing}
-                />
-              </div>
-              <div className="col-md-4">
-                <label className="form-label">Timezone</label>
-                <input
-                  className="form-control"
-                  value={orgEditing ? orgEdit.timezone ?? "" : (org as any).timezone ?? ""}
-                  onChange={(e) => setOrgEdit((p) => ({ ...p, timezone: e.target.value }))}
-                  disabled={!orgEditing}
-                />
-              </div>
+
+              {/* Address + Timezone removed (not wired) */}
             </div>
           )}
         </div>
@@ -803,14 +851,29 @@ export default function Settings() {
               ({Math.min(usersVisible, totalUsers)} of {totalUsers})
             </span>
           </div>
+
           <div className="d-flex flex-wrap gap-2">
-            <button className="btn btn-sm btn-outline-secondary" onClick={refreshUsersFromServer} disabled={userAdding || bulkSaving}>
+            <button
+              className="btn btn-sm btn-outline-secondary"
+              onClick={refreshUsersFromServer}
+              disabled={userAdding || bulkSaving}
+            >
               <i className="bi bi-arrow-clockwise" aria-hidden="true" /> Refresh
             </button>
-            <button className="btn btn-sm btn-outline-secondary" onClick={discardAllUserChanges} disabled={!hasUsersDirty || bulkSaving}>
+
+            <button
+              className="btn btn-sm btn-outline-secondary"
+              onClick={discardAllUserChanges}
+              disabled={!hasUsersDirty || bulkSaving}
+            >
               <i className="bi bi-arrow-counterclockwise" aria-hidden="true" /> Discard changes
             </button>
-            <button className="btn btn-sm btn-primary" onClick={saveAllUserChanges} disabled={!hasUsersDirty || bulkSaving}>
+
+            <button
+              className="btn btn-sm btn-primary"
+              onClick={saveAllUserChanges}
+              disabled={!hasUsersDirty || bulkSaving}
+            >
               {bulkSaving ? (
                 <>
                   <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true" />
@@ -822,7 +885,12 @@ export default function Settings() {
                 </>
               )}
             </button>
-            <button className="btn btn-sm btn-outline-primary" onClick={addUser} disabled={userAdding || bulkSaving}>
+
+            <button
+              className="btn btn-sm btn-outline-primary"
+              onClick={addUser}
+              disabled={userAdding || bulkSaving}
+            >
               {userAdding ? (
                 <>
                   <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true" />
@@ -852,8 +920,12 @@ export default function Settings() {
                       <th style={{ width: "16%" }}>Last name</th>
                       <th style={{ width: "24%" }}>Email</th>
                       <th style={{ width: "12%" }}>Role</th>
-                      <th style={{ width: "6%" }} className="text-center">Active</th>
-                      <th style={{ width: "8%" }} className="text-end">Actions</th>
+                      <th style={{ width: "6%" }} className="text-center">
+                        Active
+                      </th>
+                      <th style={{ width: "8%" }} className="text-end">
+                        Actions
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -901,10 +973,16 @@ export default function Settings() {
             <i className="bi bi-grid" aria-hidden="true" />
             <strong>Modules</strong>
           </div>
+
           <div className="d-flex gap-2">
-            <button className="btn btn-sm btn-outline-secondary" onClick={resetModulesToDefault} disabled={modulesSaving}>
+            <button
+              className="btn btn-sm btn-outline-secondary"
+              onClick={resetModulesToDefault}
+              disabled={modulesSaving}
+            >
               <i className="bi bi-arrow-counterclockwise" aria-hidden="true" /> Reset to defaults
             </button>
+
             <button
               className="btn btn-sm btn-primary"
               onClick={saveModules}
@@ -924,6 +1002,7 @@ export default function Settings() {
             </button>
           </div>
         </div>
+
         <div className="card-body">
           {modules.length === 0 ? (
             <div className="text-muted">No modules available.</div>
@@ -937,6 +1016,7 @@ export default function Settings() {
                         <div className="fw-semibold">{m.name}</div>
                         {m.description ? <div className="text-muted small">{m.description}</div> : null}
                       </div>
+
                       <div className="form-check form-switch">
                         <input
                           className="form-check-input"
@@ -963,29 +1043,7 @@ export default function Settings() {
         </div>
       </div>
 
-      {/* Connections (placeholder) */}
-      <div className="card">
-        <div className="card-header d-flex align-items-center gap-2">
-          <i className="bi bi-plug" aria-hidden="true" />
-          <strong>Connections</strong>
-        </div>
-        <div className="card-body">
-          {!summary ? (
-            <div className="text-muted">No connection summary available.</div>
-          ) : (
-            <div className="row g-3">
-              <Stat title="Total" value={summary.total} icon="bi-diagram-3" />
-              <Stat title="Active" value={summary.active} icon="bi-check-circle" />
-              <Stat title="Failed" value={summary.failed} icon="bi-exclamation-triangle" />
-              <div className="col-12">
-                <NavLink to="/connectors" className="btn btn-sm btn-outline-primary">
-                  Manage connectors
-                </NavLink>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+      {/* Connections section removed (not needed) */}
     </div>
   );
 }
@@ -1026,6 +1084,7 @@ function UserRowEditor({
     setResetting(true);
     const ok = await onResetPassword(draft.id, pw1);
     setResetting(false);
+
     if (ok) {
       setResetOk(true);
       setPw1("");
@@ -1190,20 +1249,5 @@ function UserRowEditor({
         </tr>
       )}
     </>
-  );
-}
-
-/** --- Small stat tile --- */
-function Stat({ title, value, icon }: { title: string; value: React.ReactNode; icon: string }) {
-  return (
-    <div className="col-sm-4 col-md-3">
-      <div className="p-3 border rounded d-flex align-items-center gap-2">
-        <i className={`bi ${icon}`} aria-hidden="true" />
-        <div>
-          <div className="text-muted small">{title}</div>
-          <div className="fw-semibold">{value}</div>
-        </div>
-      </div>
-    </div>
   );
 }
