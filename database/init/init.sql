@@ -480,8 +480,10 @@ WHERE NOT EXISTS (SELECT 1 FROM machines WHERE environment_id = 3 AND machine_co
 
 -- 8) Seed sensor types
 INSERT INTO sensor_types (code, unit, description) VALUES
-('temperature', '°C', 'Water temperature'),
-('conductivity', 'µS/cm', 'Water conductivity'),
-('a0', 'A0', 'A0 disinfection value'),
-('pressure', 'bar', 'Water pressure')
+    ('temperature',    '°C',    'Water temperature (logical / merged)'),
+    ('temperature_1',  '°C',    'Water temperature probe 1'),
+    ('temperature_2',  '°C',    'Water temperature probe 2'),
+    ('pressure',       'bar',   'Water pressure'),
+    ('conductivity',   'µS/cm', 'Water conductivity'),
+    ('a0',             'A0',    'A0 disinfection value')
 ON CONFLICT (code) DO NOTHING;

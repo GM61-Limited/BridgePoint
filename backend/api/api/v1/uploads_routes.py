@@ -8,7 +8,7 @@ from typing import Optional
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, Query
 
 from app.core.config import settings
-from app.core.washer_xml_parser import parse_washer_xml_phase1
+from app.core.washer_xml_phase1 import parse_washer_xml_phase1
 from app.db.connection import get_db_connection
 from app.db.uploads_repo import create_washer_xml_upload, list_washer_xml_uploads
 
@@ -33,15 +33,15 @@ def _safe_filename(filename: str) -> str:
     return filename
 
 
+# ==================================================
+# LIST UPLOADS
+# ==================================================
 @router.get("/washer-xml")
 def get_washer_xml_uploads(
     environment_code: Optional[str] = Query(None),
     machine_id: Optional[int] = Query(None),
     limit: int = Query(200, ge=1, le=1000),
 ):
-    """
-    List uploaded washer XML metadata.
-    """
     items = list_washer_xml_uploads(
         environment_code=environment_code,
         machine_id=machine_id,
@@ -50,6 +50,9 @@ def get_washer_xml_uploads(
     return {"items": items}
 
 
+# ==================================================
+# UPLOAD XML
+# ==================================================
 @router.post("/washer-xml")
 async def upload_washer_xml(
     file: UploadFile = File(...),
@@ -70,7 +73,7 @@ async def upload_washer_xml(
             )
 
     # --------------------------------------------------
-    # Storage path (Docker volume)
+    # Storage path
     # --------------------------------------------------
     env_seg = _safe_segment(environment_code)
     base_dir = (
@@ -87,7 +90,7 @@ async def upload_washer_xml(
     stored_path = base_dir / stored_name
 
     # --------------------------------------------------
-    # Stream upload to disk with size cap
+    # Stream upload to disk (size‑capped)
     # --------------------------------------------------
     max_bytes = int(getattr(settings, "MAX_UPLOAD_MB", 25)) * 1024 * 1024
     written = 0
@@ -126,11 +129,10 @@ async def upload_washer_xml(
     )
 
     # --------------------------------------------------
-    # Phase 1 parsing (synchronous, non-fatal)
+    # Phase 1 parsing (CRITICAL, synchronous)
     # --------------------------------------------------
     conn = get_db_connection()
     try:
-        # Resolve environment_id via machine (authoritative)
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -142,14 +144,12 @@ async def upload_washer_xml(
             )
             row = cur.fetchone()
             if not row:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Invalid machine_id",
-                )
+                raise HTTPException(status_code=400, detail="Invalid machine_id")
             environment_id = row[0]
 
         try:
-            parse_washer_xml_phase1(
+            # ✅ Phase 1 — must succeed
+            cycle_id = parse_washer_xml_phase1(
                 conn=conn,
                 upload_id=record["id"],
                 xml_path=record["stored_path"],
@@ -157,16 +157,44 @@ async def upload_washer_xml(
                 machine_id=machine_id,
             )
 
-            # ✅ ✅ ✅ CRITICAL LINE (this was missing)
             conn.commit()
 
         except Exception as parse_err:
-            # Roll back parsing work only
             conn.rollback()
-
-            # Parsing errors must NOT break upload
             print(
-                f"[WARN] Washer XML parsing failed for upload {record['id']}: {parse_err}"
+                f"[WARN] Washer XML phase 1 parsing failed for upload {record['id']}: {parse_err}"
+            )
+            return {"ok": True, **record}
+
+        # --------------------------------------------------
+        # Phase 2 process signals (OPTIONAL, SAFE)
+        # --------------------------------------------------
+        try:
+            from app.core.process_signals import (
+                parse_process_signals_from_xml,
+                insert_process_signals,
+            )
+
+            # Read XML once
+            with open(record["stored_path"], "rb") as f:
+                xml_bytes = f.read()
+
+            signals = parse_process_signals_from_xml(xml_bytes)
+
+            if signals:
+                insert_process_signals(
+                    conn=conn,          # ✅ FIXED
+                    cycle_id=cycle_id,
+                    signals=signals,
+                )
+
+            conn.commit()
+
+        except Exception as signals_err:
+            # Process signals must NEVER break uploads
+            conn.rollback()
+            print(
+                f"[WARN] Process signal parsing failed for cycle {cycle_id}: {signals_err}"
             )
 
     finally:

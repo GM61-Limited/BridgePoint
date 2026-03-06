@@ -402,33 +402,29 @@ export async function getWasherCycle(id: number): Promise<WasherCycle> {
   return res.data;
 }
 
-// ---------- Telemetry ----------
-export interface WasherTelemetryPoint {
-  timestamp: string;
-  temperature: number | null;
-  a0: number | null;
-  conductivity: number | null;
-}
+// ---------- Telemetry (series-based, NEW) ----------
+export type TelemetrySeries = {
+  sensor: string;
+  unit: string;
+  series: [number, number][];
+};
 
 export interface WasherTelemetryResponse {
   cycle_id: number;
-  started_at: string;
+  started_at?: string;
   validation: {
     source: string;
     result: "PASS" | "FAIL" | "UNKNOWN";
-    original_filename: string | null;
+    original_filename?: string | null;
   };
-  points: WasherTelemetryPoint[];
+  points: TelemetrySeries[];
 }
 
 export async function getWasherCycleTelemetry(
   cycleId: number
 ): Promise<WasherTelemetryResponse> {
-  const res = await fetch(`/api/v1/washer-cycles/${cycleId}/telemetry`);
-
-  if (!res.ok) {
-    throw new Error("Failed to load telemetry");
-  }
-
-  return res.json();
+  const { data } = await api.get<WasherTelemetryResponse>(
+    `/v1/washer-cycles/${cycleId}/telemetry`
+  );
+  return data;
 }

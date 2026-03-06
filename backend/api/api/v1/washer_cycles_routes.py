@@ -47,7 +47,7 @@ def list_washer_cycles():
                     "machine_name": r[6],
                     "original_filename": r[7],
                     "result": r[8],
-                    "extra": r[9],  # ✅ CRITICAL
+                    "extra": r[9],
                 }
             )
 
@@ -99,7 +99,7 @@ def get_washer_cycle(cycle_id: int):
             "machine_name": row[6],
             "original_filename": row[7],
             "result": row[8],
-            "extra": row[9],  # ✅ THIS FIXES THE UI
+            "extra": row[9],
         }
     finally:
         conn.close()
@@ -165,7 +165,7 @@ def delete_washer_cycle(cycle_id: int):
 
 
 # ==================================================
-# PHASE 2.1 — TELEMETRY (UNCHANGED)
+# ✅ TELEMETRY — UI‑COMPATIBLE (FIXED)
 # ==================================================
 @router.get("/{cycle_id}/telemetry")
 def get_washer_cycle_telemetry(cycle_id: int):
@@ -199,6 +199,39 @@ def get_washer_cycle_telemetry(cycle_id: int):
         else:
             result = "UNKNOWN"
 
+        # Fetch telemetry points
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    st.code,
+                    st.unit,
+                    wcp.t_sec,
+                    wcp.value
+                FROM washer_cycle_points wcp
+                JOIN sensor_types st ON st.id = wcp.sensor_type_id
+                WHERE wcp.cycle_id = %s
+                ORDER BY st.code, wcp.t_sec
+                """,
+                (cycle_id,),
+            )
+            rows = cur.fetchall()
+
+        # ✅ FIX: build ARRAY, not object
+        points_map = {}
+
+        for sensor_code, unit, t_sec, value in rows:
+            if sensor_code not in points_map:
+                points_map[sensor_code] = {
+                    "sensor": sensor_code,
+                    "unit": unit,
+                    "series": [],
+                }
+
+            points_map[sensor_code]["series"].append([t_sec, value])
+
+        points = list(points_map.values())
+
         return {
             "cycle_id": cycle_id,
             "started_at": started_at.isoformat() if started_at else None,
@@ -207,7 +240,8 @@ def get_washer_cycle_telemetry(cycle_id: int):
                 "result": result,
                 "original_filename": original_filename,
             },
-            "points": [],
+            "points": points,  # ✅ ARRAY — frontend .map() works
         }
+
     finally:
         conn.close()
