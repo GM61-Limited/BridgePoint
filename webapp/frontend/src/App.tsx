@@ -21,8 +21,11 @@ import WashCycleDetails from "./pages/WashCycleDetails";
 import WashCycles from "./pages/WashCycles";
 import WashersOverview from "./pages/WashersOverview";
 
-// ✅ NEW: Machine Monitoring Dashboard
+// ✅ Machine Monitoring Dashboard
 import MachinesDashboard from "./pages/MachinesDashboard";
+
+// ✅ NEW: Health (Predictive / Maintenance placeholder)
+import Health from "./pages/Health";
 
 // Connectors
 import Connectors from "./pages/connectors";
@@ -131,7 +134,7 @@ export default function App() {
               }
             />
 
-            {/* ✅ NEW: Machines Dashboard */}
+            {/* ✅ Machines Dashboard */}
             <Route
               path="machines/dashboard"
               element={
@@ -141,11 +144,18 @@ export default function App() {
               }
             />
 
-            {/* Backwards compatibility */}
+            {/* ✅ NEW: Health (Preview) */}
             <Route
-              path="washers"
-              element={<Navigate to="/machines" replace />}
+              path="machines/health"
+              element={
+                <RequireModule module="machine-monitoring">
+                  <Health />
+                </RequireModule>
+              }
             />
+
+            {/* Backwards compatibility */}
+            <Route path="washers" element={<Navigate to="/machines" replace />} />
 
             <Route
               path="devices/:deviceId"
@@ -175,7 +185,7 @@ export default function App() {
               }
             />
 
-            {/* ✅ Cycle Details */}
+            {/* Cycle Details */}
             <Route
               path="wash-cycles/:id"
               element={
@@ -230,18 +240,8 @@ export default function App() {
               }
             />
 
-            {/* Alerts */}
-            <Route
-              path="alerts"
-              element={
-                <RequireModule module="machine-monitoring">
-                  <UnderConstruction
-                    title="Alerts"
-                    description="Real-time alerts and notifications are on the way."
-                  />
-                </RequireModule>
-              }
-            />
+            {/* ✅ Alerts route removed (retired for now)
+                If you want to keep it for later, you can re-add it easily. */}
 
             {/* Finance */}
             <Route

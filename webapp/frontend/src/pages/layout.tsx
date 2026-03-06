@@ -95,11 +95,12 @@ export default function Layout() {
   const showAnalytics = isEnabled("analytics");
   const showFinance = isEnabled("finance");
 
-  // Alerts are part of machine monitoring ✅ (your decision)
-  const showAlerts = showMachineMonitoring;
-
   // What should the environment badge show?
-  const envLabel = modulesLoading ? "Environment" : environment?.name ? environment.name : "Environment";
+  const envLabel = modulesLoading
+    ? "Environment"
+    : environment?.name
+    ? environment.name
+    : "Environment";
 
   return (
     <div className={`app-shell d-flex ${collapsed ? "sidebar-collapsed" : ""}`}>
@@ -111,11 +112,13 @@ export default function Layout() {
         </div>
 
         <nav className="nav flex-column px-2 py-2" aria-label="Primary">
-          {/* Home (core) */}
+          {/* Home */}
           <NavLink
             to="/home"
             end
-            className={({ isActive }) => `nav-link d-flex align-items-center ${isActive ? "active" : ""}`}
+            className={({ isActive }) =>
+              `nav-link d-flex align-items-center ${isActive ? "active" : ""}`
+            }
           >
             <i className="bi bi-house-door me-2" aria-hidden="true" />
             <span className="sidebar-label">Home</span>
@@ -128,61 +131,46 @@ export default function Layout() {
                 MACHINE MONITORING
               </div>
 
-              {/* Machines (overview/list) */}
               <NavLink
                 to="/machines"
                 className={({ isActive }) =>
-                  `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
+                  `nav-link d-flex align-items-center ${isActive ? "active" : ""}`
                 }
               >
-                <span className="d-flex align-items-center">
-                  <i className="bi bi-hdd-stack me-2" aria-hidden="true" />
-                  <span className="sidebar-label">Machines</span>
-                </span>
+                <i className="bi bi-hdd-stack me-2" aria-hidden="true" />
+                <span className="sidebar-label">Machines</span>
               </NavLink>
 
-              {/* ✅ NEW: Machines Dashboard */}
               <NavLink
                 to="/machines/dashboard"
                 className={({ isActive }) =>
-                  `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
+                  `nav-link d-flex align-items-center ${isActive ? "active" : ""}`
                 }
               >
-                <span className="d-flex align-items-center">
-                  <i className="bi bi-graph-up me-2" aria-hidden="true" />
-                  <span className="sidebar-label">Dashboard</span>
-                </span>
+                <i className="bi bi-graph-up me-2" aria-hidden="true" />
+                <span className="sidebar-label">Dashboard</span>
               </NavLink>
 
-              {/* Cycles */}
+              {/* ✅ NEW: Health */}
+              <NavLink
+                to="/machines/health"
+                className={({ isActive }) =>
+                  `nav-link d-flex align-items-center ${isActive ? "active" : ""}`
+                }
+              >
+                <i className="bi bi-heart-pulse me-2" aria-hidden="true" />
+                <span className="sidebar-label">Health</span>
+              </NavLink>
+
               <NavLink
                 to="/wash-cycles"
                 className={({ isActive }) =>
-                  `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
+                  `nav-link d-flex align-items-center ${isActive ? "active" : ""}`
                 }
               >
-                <span className="d-flex align-items-center">
-                  <i className="bi bi-arrow-repeat me-2" aria-hidden="true" />
-                  <span className="sidebar-label">Cycles</span>
-                </span>
+                <i className="bi bi-arrow-repeat me-2" aria-hidden="true" />
+                <span className="sidebar-label">Cycles</span>
               </NavLink>
-
-              {/* Upload cycles (REMOVED from sidebar; now accessed from machine cards/details) */}
-
-              {/* Alerts */}
-              {showAlerts && (
-                <NavLink
-                  to="/alerts"
-                  className={({ isActive }) =>
-                    `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
-                  }
-                >
-                  <span className="d-flex align-items-center">
-                    <i className="bi bi-bell me-2" aria-hidden="true" />
-                    <span className="sidebar-label">Alerts</span>
-                  </span>
-                </NavLink>
-              )}
             </>
           )}
 
@@ -196,25 +184,21 @@ export default function Layout() {
               <NavLink
                 to="/pipelines"
                 className={({ isActive }) =>
-                  `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
+                  `nav-link d-flex align-items-center ${isActive ? "active" : ""}`
                 }
               >
-                <span className="d-flex align-items-center">
-                  <i className="bi bi-diagram-3 me-2" aria-hidden="true" />
-                  <span className="sidebar-label">Pipelines</span>
-                </span>
+                <i className="bi bi-diagram-3 me-2" aria-hidden="true" />
+                <span className="sidebar-label">Pipelines</span>
               </NavLink>
 
               <NavLink
                 to="/connectors"
                 className={({ isActive }) =>
-                  `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
+                  `nav-link d-flex align-items-center ${isActive ? "active" : ""}`
                 }
               >
-                <span className="d-flex align-items-center">
-                  <i className="bi bi-plug me-2" aria-hidden="true" />
-                  <span className="sidebar-label">Connectors</span>
-                </span>
+                <i className="bi bi-plug me-2" aria-hidden="true" />
+                <span className="sidebar-label">Connectors</span>
               </NavLink>
             </>
           )}
@@ -229,13 +213,11 @@ export default function Layout() {
               <NavLink
                 to="/dashboards"
                 className={({ isActive }) =>
-                  `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
+                  `nav-link d-flex align-items-center ${isActive ? "active" : ""}`
                 }
               >
-                <span className="d-flex align-items-center">
-                  <i className="bi bi-bar-chart-line me-2" aria-hidden="true" />
-                  <span className="sidebar-label">Dashboards</span>
-                </span>
+                <i className="bi bi-bar-chart-line me-2" aria-hidden="true" />
+                <span className="sidebar-label">Dashboards</span>
               </NavLink>
             </>
           )}
@@ -250,31 +232,30 @@ export default function Layout() {
               <NavLink
                 to="/finance"
                 className={({ isActive }) =>
-                  `nav-link d-flex align-items-center justify-content-between ${isActive ? "active" : ""}`
+                  `nav-link d-flex align-items-center ${isActive ? "active" : ""}`
                 }
               >
-                <span className="d-flex align-items-center">
-                  <i className="bi bi-currency-pound me-2" aria-hidden="true" />
-                  <span className="sidebar-label">Finance</span>
-                </span>
+                <i className="bi bi-currency-pound me-2" aria-hidden="true" />
+                <span className="sidebar-label">Finance</span>
               </NavLink>
             </>
           )}
 
-          {/* Settings (core) */}
+          {/* -------- Core -------- */}
           <div className="px-3 pt-3 pb-1 text-secondary small" style={{ opacity: 0.9 }}>
             CORE
           </div>
 
           <NavLink
             to="/settings"
-            className={({ isActive }) => `nav-link d-flex align-items-center ${isActive ? "active" : ""}`}
+            className={({ isActive }) =>
+              `nav-link d-flex align-items-center ${isActive ? "active" : ""}`
+            }
           >
             <i className="bi bi-gear me-2" aria-hidden="true" />
             <span className="sidebar-label">Settings</span>
           </NavLink>
 
-          {/* Optional: show a tiny warning if modules failed to load */}
           {modulesError && (
             <div className="px-3 pt-2 text-warning small">
               <i className="bi bi-exclamation-triangle me-1" aria-hidden="true" />
@@ -290,8 +271,13 @@ export default function Layout() {
             aria-pressed={collapsed}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
-            <i className={`bi ${collapsed ? "bi-layout-sidebar-inset" : "bi-layout-sidebar"}`} aria-hidden="true" />
-            <span className="ms-2 sidebar-label">{collapsed ? "Expand" : "Collapse"}</span>
+            <i
+              className={`bi ${collapsed ? "bi-layout-sidebar-inset" : "bi-layout-sidebar"}`}
+              aria-hidden="true"
+            />
+            <span className="ms-2 sidebar-label">
+              {collapsed ? "Expand" : "Collapse"}
+            </span>
           </button>
         </div>
       </aside>
@@ -300,43 +286,37 @@ export default function Layout() {
       <div className="flex-grow-1 d-flex flex-column">
         <header className="topbar" aria-label="Top bar">
           <div className="d-flex align-items-center justify-content-between px-3 py-2">
-            {/* Environment badge */}
             <span className="badge bg-secondary">{envLabel}</span>
 
             <div className="d-flex align-items-center gap-2">
               {/* Notifications (placeholder) */}
               <button className={`btn btn-sm ${btnOutline}`}>
-                <i className="bi bi-bell" aria-hidden="true" />{" "}
+                <i className="bi bi-bell" aria-hidden="true" />
                 <span className="sidebar-label">Notifications</span>
               </button>
 
-              {/* Theme toggle */}
               <button
                 type="button"
                 className={`btn btn-sm ${btnOutline}`}
                 onClick={handleThemeToggle}
                 title={toggleTitle}
-                aria-label="Toggle color mode"
               >
                 <i className={`bi ${iconClass}`} aria-hidden="true" />
               </button>
 
-              {/* Sign out */}
               <button
                 className="btn btn-sm btn-primary"
                 onClick={handleSignOut}
                 disabled={signingOut}
-                aria-label="Sign out"
-                title="Sign out"
               >
                 {signingOut ? (
                   <>
-                    <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true" />
+                    <span className="spinner-border spinner-border-sm me-2" />
                     <span className="sidebar-label">Signing out…</span>
                   </>
                 ) : (
                   <>
-                    <i className="bi bi-box-arrow-right" aria-hidden="true" />{" "}
+                    <i className="bi bi-box-arrow-right" aria-hidden="true" />
                     <span className="sidebar-label">Sign out</span>
                   </>
                 )}
