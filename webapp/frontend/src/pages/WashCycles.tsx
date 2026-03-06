@@ -1,4 +1,3 @@
-// src/pages/WashCycles.tsx
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, listWasherCycles, type WasherCycle } from "../lib/api";
@@ -9,15 +8,23 @@ type WashCycleRow = {
   program: string;
   machine: string;
   start: string; // ISO
+  end: string | null; // ISO
+  result: "PASS" | "FAIL" | "UNKNOWN";
 };
 
 function toRow(c: WasherCycle): WashCycleRow {
+  let result: "PASS" | "FAIL" | "UNKNOWN" = "UNKNOWN";
+  if (c.result === true) result = "PASS";
+  else if (c.result === false) result = "FAIL";
+
   return {
     id: c.id,
     cycleNo: c.cycle_number,
     program: c.program_name ?? "—",
     machine: c.machine_name,
     start: c.started_at,
+    end: c.ended_at,
+    result,
   };
 }
 
@@ -41,30 +48,24 @@ export default function WashCycles() {
   }, [deviceParam]);
 
   // Load parsed washer cycles
+  async function loadCycles() {
+    setLoading(true);
+    try {
+      const cycles = await listWasherCycles();
+      const mapped = cycles.map(toRow);
+      setRows(mapped);
+      setStatusMsg(
+        mapped.length
+          ? `Loaded ${mapped.length} cycle(s).`
+          : "No cycles yet. Upload cycles to begin."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
-    let mounted = true;
-
-    (async () => {
-      setLoading(true);
-      try {
-        const cycles = await listWasherCycles();
-        if (!mounted) return;
-
-        const mapped = cycles.map(toRow);
-        setRows(mapped);
-        setStatusMsg(
-          mapped.length
-            ? `Loaded ${mapped.length} cycle(s).`
-            : "No cycles yet. Upload cycles to begin."
-        );
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    })();
-
-    return () => {
-      mounted = false;
-    };
+    loadCycles();
   }, []);
 
   const machineOptions = useMemo(
@@ -143,6 +144,19 @@ export default function WashCycles() {
     }
   }
 
+  // ✅ DELETE CYCLE
+  async function deleteCycle(cycleId: number) {
+    if (!confirm("Delete this cycle? This cannot be undone.")) return;
+
+    try {
+      await api.delete(`/v1/washer-cycles/${cycleId}`);
+      await loadCycles();
+    } catch (err) {
+      console.error("Delete failed", err);
+      alert("Failed to delete cycle.");
+    }
+  }
+
   return (
     <div className="container py-4">
       {/* Header */}
@@ -150,7 +164,7 @@ export default function WashCycles() {
         <div>
           <h1 className="h4 mb-0">Cycles</h1>
           <div className="text-secondary small">
-            Parsed cycles appear immediately (telemetry pending).
+            Parsed cycles appear immediately.
           </div>
           {statusMsg && (
             <div className="text-secondary small mt-1">{statusMsg}</div>
@@ -233,6 +247,8 @@ export default function WashCycles() {
                 <th>Machine</th>
                 <th>Program</th>
                 <th>Start</th>
+                <th>End</th>
+                <th>Result</th>
                 <th className="text-end">Actions</th>
               </tr>
             </thead>
@@ -243,6 +259,22 @@ export default function WashCycles() {
                   <td>{r.machine}</td>
                   <td>{r.program}</td>
                   <td>{new Date(r.start).toLocaleString()}</td>
+                  <td>
+                    {r.end ? new Date(r.end).toLocaleString() : "—"}
+                  </td>
+                  <td>
+                    <span
+                      className={
+                        r.result === "PASS"
+                          ? "badge bg-success"
+                          : r.result === "FAIL"
+                          ? "badge bg-danger"
+                          : "badge bg-secondary"
+                      }
+                    >
+                      {r.result}
+                    </span>
+                  </td>
                   <td className="text-end">
                     <div className="d-inline-flex gap-2">
                       <Link
@@ -258,6 +290,13 @@ export default function WashCycles() {
                       >
                         <i className="bi bi-download" />
                       </button>
+                      <button
+                        className="btn btn-outline-danger btn-sm"
+                        title="Delete cycle"
+                        onClick={() => deleteCycle(r.id)}
+                      >
+                        <i className="bi bi-trash" />
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -265,7 +304,7 @@ export default function WashCycles() {
 
               {!loading && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="text-center text-secondary py-4">
+                  <td colSpan={7} className="text-center text-secondary py-4">
                     No cycles match the selected filters.
                   </td>
                 </tr>
@@ -273,7 +312,7 @@ export default function WashCycles() {
 
               {loading && (
                 <tr>
-                  <td colSpan={5} className="text-center text-secondary py-4">
+                  <td colSpan={7} className="text-center text-secondary py-4">
                     Loading…
                   </td>
                 </tr>

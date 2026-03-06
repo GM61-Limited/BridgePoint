@@ -1,7 +1,5 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
-import os
-
 from app.db.connection import get_db_connection
 
 router = APIRouter(prefix="/v1/washer-cycles", tags=["Washer Cycles"])
@@ -9,9 +7,6 @@ router = APIRouter(prefix="/v1/washer-cycles", tags=["Washer Cycles"])
 
 @router.get("")
 def list_washer_cycles():
-    """
-    List parsed washer cycles (Phase 1 fields only).
-    """
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
@@ -22,9 +17,11 @@ def list_washer_cycles():
                     wc.cycle_number,
                     wc.program_name,
                     wc.started_at,
+                    wc.ended_at,
                     wc.machine_id,
                     m.machine_name,
-                    wx.original_filename
+                    wx.original_filename,
+                    wc.result
                 FROM washer_cycles wc
                 JOIN machines m ON m.id = wc.machine_id
                 LEFT JOIN washer_xml_uploads wx ON wx.id = wc.upload_id
@@ -41,9 +38,11 @@ def list_washer_cycles():
                     "cycle_number": r[1],
                     "program_name": r[2],
                     "started_at": r[3].isoformat() if r[3] else None,
-                    "machine_id": r[4],
-                    "machine_name": r[5],
-                    "original_filename": r[6],
+                    "ended_at": r[4].isoformat() if r[4] else None,
+                    "machine_id": r[5],
+                    "machine_name": r[6],
+                    "original_filename": r[7],
+                    "result": r[8],
                 }
             )
 
@@ -52,62 +51,14 @@ def list_washer_cycles():
         conn.close()
 
 
-@router.get("/{cycle_id}")
-def get_washer_cycle(cycle_id: int):
-    """
-    Get details for a single washer cycle (Phase 1).
-    """
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT
-                    wc.id,
-                    wc.cycle_number,
-                    wc.program_name,
-                    wc.started_at,
-                    wc.machine_id,
-                    m.machine_name,
-                    wx.original_filename
-                FROM washer_cycles wc
-                JOIN machines m ON m.id = wc.machine_id
-                LEFT JOIN washer_xml_uploads wx ON wx.id = wc.upload_id
-                WHERE wc.id = %s
-                """,
-                (cycle_id,),
-            )
-            row = cur.fetchone()
-
-        if not row:
-            raise HTTPException(status_code=404, detail="Cycle not found")
-
-        return {
-            "id": row[0],
-            "cycle_number": row[1],
-            "program_name": row[2],
-            "started_at": row[3].isoformat() if row[3] else None,
-            "machine_id": row[4],
-            "machine_name": row[5],
-            "original_filename": row[6],
-        }
-    finally:
-        conn.close()
-
-
 @router.get("/{cycle_id}/download")
 def download_washer_cycle_xml(cycle_id: int):
-    """
-    Download the original XML file for a washer cycle.
-    """
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT
-                    wx.stored_path,
-                    wx.original_filename
+                SELECT wx.stored_path, wx.original_filename
                 FROM washer_cycles wc
                 JOIN washer_xml_uploads wx ON wx.id = wc.upload_id
                 WHERE wc.id = %s
@@ -117,17 +68,42 @@ def download_washer_cycle_xml(cycle_id: int):
             row = cur.fetchone()
 
         if not row:
-            raise HTTPException(status_code=404, detail="Cycle or XML not found")
+            raise HTTPException(status_code=404, detail="Cycle not found")
 
         stored_path, original_filename = row
 
-        if not stored_path or not os.path.exists(stored_path):
-            raise HTTPException(status_code=404, detail="XML file missing on disk")
-
         return FileResponse(
             path=stored_path,
-            filename=original_filename,
-            media_type="application/xml; charset=utf-8",
+            media_type="application/xml",
+            filename=original_filename or "cycle.xml",
         )
+    finally:
+        conn.close()
+
+
+# --------------------------------------------------
+# ✅ FIXED DELETE (PHASE‑1 SAFE, NO 500s)
+# --------------------------------------------------
+@router.delete("/{cycle_id}")
+def delete_washer_cycle(cycle_id: int):
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            # Ensure cycle exists
+            cur.execute(
+                "SELECT 1 FROM washer_cycles WHERE id = %s",
+                (cycle_id,),
+            )
+            if not cur.fetchone():
+                raise HTTPException(status_code=404, detail="Cycle not found")
+
+            # Delete cycle only (rely on DB constraints / cascades)
+            cur.execute(
+                "DELETE FROM washer_cycles WHERE id = %s",
+                (cycle_id,),
+            )
+
+        conn.commit()
+        return {"ok": True}
     finally:
         conn.close()

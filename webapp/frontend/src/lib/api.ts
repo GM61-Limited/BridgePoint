@@ -91,14 +91,9 @@ api.interceptors.response.use(
   }
 );
 
-// ---------- Typed endpoint helpers (adjust paths to match your backend) ----------
+// ---------- Typed endpoint helpers ----------
 export type User = { id?: string; name?: string; roles?: string[] };
 
-/**
- * Login with username/password.
- * Backend returns { access_token, token_type }.
- * We normalize to { token, user } so existing AuthContext code works unchanged.
- */
 export async function login(username: string, password: string) {
   const { data } = await api.post<{ access_token?: string; token_type?: string }>(
     "/login",
@@ -107,30 +102,25 @@ export async function login(username: string, password: string) {
 
   return {
     token: data?.access_token ?? null,
-    // token_type is typically 'bearer'; interceptor sends "Bearer <token>"
-    user: null, // fetch via getMe() later if you need user details
+    user: null,
   } as { token?: string | null; user?: User | null };
 }
 
-/** For cookie-based sessions, returns the current user (or null) */
 export async function getMe() {
   const { data } = await api.get<User | null>("/me");
   return data;
 }
 
-/** Logout for session or token-based flows */
 export async function logout() {
   await api.post<void>("/logout");
 }
 
-/** Example protected resource */
 export async function getOverview() {
   const { data } = await api.get("/overview");
   return data;
 }
 
-// ---------- SQL Connections (list/test/query) ----------
-
+// ---------- SQL Connections ----------
 export type SqlConnection = {
   id: number;
   environment_id: number;
@@ -145,7 +135,7 @@ export type SqlConnection = {
 
 export async function listSqlConnections(envId: number) {
   const { data } = await api.get<SqlConnection[]>(`/v1/sql-connections`, {
-    params: { envId }, // backend route is /api/v1/sql-connections?envId=2
+    params: { envId },
   });
   return data;
 }
@@ -157,7 +147,11 @@ export async function testSqlConnection(id: number) {
   return data;
 }
 
-export async function runSqlSelect<T = any>(id: number, sql: string, params: any[] = []) {
+export async function runSqlSelect<T = any>(
+  id: number,
+  sql: string,
+  params: any[] = []
+) {
   const { data } = await api.post<{ rows: T[]; count: number }>(
     `/v1/sql-connections/${id}/query`,
     { sql, params }
@@ -166,7 +160,6 @@ export async function runSqlSelect<T = any>(id: number, sql: string, params: any
 }
 
 // ---------- Environment / Modules ----------
-
 export async function getEnvironment() {
   const { data } = await api.get<Environment>("/environment");
   return data;
@@ -175,50 +168,51 @@ export async function getEnvironment() {
 export async function getEnvironmentModules(envId: number) {
   const { data } = await api.get<
     { environmentId?: number; modules?: ModuleToggle[] } | ModuleToggle[]
-  >("/environment/modules", { headers: { "X-Environment-Id": String(envId) } });
+  >("/environment/modules", {
+    headers: { "X-Environment-Id": String(envId) },
+  });
 
-  // Backend returns { environmentId, modules } (expected), but handle plain array too
   if (Array.isArray(data)) return data as ModuleToggle[];
-  return Array.isArray((data as any)?.modules) ? ((data as any).modules as ModuleToggle[]) : [];
+  return Array.isArray((data as any)?.modules)
+    ? ((data as any).modules as ModuleToggle[])
+    : [];
 }
 
-export async function putEnvironmentModules(envId: number, modules: ModuleToggle[]) {
+export async function putEnvironmentModules(
+  envId: number,
+  modules: ModuleToggle[]
+) {
   const { data } = await api.put<{ environmentId?: number; modules?: ModuleToggle[] }>(
     "/environment/modules",
     { modules },
     { headers: { "X-Environment-Id": String(envId) } }
   );
 
-  return Array.isArray((data as any)?.modules) ? ((data as any).modules as ModuleToggle[]) : modules;
+  return Array.isArray((data as any)?.modules)
+    ? ((data as any).modules as ModuleToggle[])
+    : modules;
 }
 
 // ---------- Machines / Lookups ----------
-
 export type Machine = {
   id: number;
   environment_id: number;
-
   machine_name: string;
   machine_code: string;
-
-  machine_type: string; // 'washer', 'steriliser', etc.
+  machine_type: string;
   manufacturer?: string | null;
   model?: string | null;
   serial_number?: string | null;
-
   ip_address?: string | null;
   port?: number | null;
   hostname?: string | null;
   protocol?: string | null;
   base_path?: string | null;
-
   location?: string | null;
   timezone?: string | null;
   notes?: string | null;
-
   is_active: boolean;
   integration_key?: string | null;
-
   created_at?: string;
   updated_at?: string;
 };
@@ -237,7 +231,6 @@ export type IntegrationProfile = {
   is_active: boolean;
 };
 
-/** Lookups */
 export async function getMachineTypes() {
   const { data } = await api.get<{ items: MachineType[] }>(
     "/v1/lookups/machine-types"
@@ -252,7 +245,6 @@ export async function getIntegrationProfiles() {
   return data.items;
 }
 
-/** Machines */
 export async function listMachines(params?: {
   machine_type?: string;
   is_active?: boolean;
@@ -287,15 +279,11 @@ export async function updateMachine(id: number, payload: Partial<Machine>) {
   return data;
 }
 
-/**
- * Soft delete – sets is_active=false (backend implements as soft-delete)
- */
 export async function deactivateMachine(id: number) {
   await api.delete<void>(`/v1/machines/${id}`);
 }
 
 // ---------- Uploads (Washer XML) ----------
-
 export type WasherXmlUploadResponse = {
   ok: boolean;
   environment_code: string;
@@ -319,7 +307,6 @@ export async function uploadWasherXml(params: {
   if (params.cycleNumber) form.append("cycle_number", params.cycleNumber);
   form.append("file", params.file);
 
-  // DO NOT set Content-Type here; axios sets multipart boundary automatically
   const { data } = await api.post<WasherXmlUploadResponse>(
     "/v1/uploads/washer-xml",
     form
@@ -328,22 +315,24 @@ export async function uploadWasherXml(params: {
   return data;
 }
 
-/** Utility: Extract a readable message from an Axios error */
 export function getApiErrorMessage(err: unknown): string {
   const e = err as AxiosError<any>;
   const status = e?.response?.status;
-
-  // FastAPI often returns {"detail": "..."} on errors
   const detail = (e?.response?.data as any)?.detail;
-  if (typeof detail === "string") return status ? `${detail} (HTTP ${status})` : detail;
 
-  // Sometimes it returns text/html or plain text
-  if (typeof e?.response?.data === "string") return status ? `${e.response.data} (HTTP ${status})` : e.response.data;
+  if (typeof detail === "string")
+    return status ? `${detail} (HTTP ${status})` : detail;
+
+  if (typeof e?.response?.data === "string")
+    return status
+      ? `${e.response.data} (HTTP ${status})`
+      : e.response.data;
 
   if (e?.message) return e.message;
   return "Unknown error";
 }
 
+// ---------- Washer XML uploads ----------
 export type WasherXmlUploadRecord = {
   id: number;
   environment_code: string;
@@ -353,8 +342,8 @@ export type WasherXmlUploadRecord = {
   stored_filename: string;
   stored_path: string;
   bytes: number;
-  uploaded_at: string;     // ISO
-  parse_status: string;    // "pending" for now
+  uploaded_at: string;
+  parse_status: string;
 };
 
 export async function listWasherXmlUploads(params?: {
@@ -375,14 +364,20 @@ export async function listWasherXmlUploads(params?: {
   return data.items;
 }
 
+// ---------- Washer Cycles ----------
 export type WasherCycle = {
   id: number;
   cycle_number: number | null;
   program_name: string | null;
+
   started_at: string;
+  ended_at: string | null;        // ✅ added
+
   machine_id: number;
   machine_name: string;
-  original_filename?: string;
+  original_filename?: string | null;
+
+  result: boolean | null;         // ✅ corrected
 };
 
 export async function listWasherCycles(): Promise<WasherCycle[]> {
@@ -393,4 +388,35 @@ export async function listWasherCycles(): Promise<WasherCycle[]> {
 export async function getWasherCycle(id: number): Promise<WasherCycle> {
   const res = await api.get(`/v1/washer-cycles/${id}`);
   return res.data;
+}
+
+// ---------- Telemetry ----------
+export interface WasherTelemetryPoint {
+  timestamp: string;
+  temperature: number | null;
+  a0: number | null;
+  conductivity: number | null;
+}
+
+export interface WasherTelemetryResponse {
+  cycle_id: number;
+  started_at: string;
+  validation: {
+    source: string;
+    result: "PASS" | "FAIL" | "UNKNOWN";
+    original_filename: string | null;
+  };
+  points: WasherTelemetryPoint[];
+}
+
+export async function getWasherCycleTelemetry(
+  cycleId: number
+): Promise<WasherTelemetryResponse> {
+  const res = await fetch(`/api/v1/washer-cycles/${cycleId}/telemetry`);
+
+  if (!res.ok) {
+    throw new Error("Failed to load telemetry");
+  }
+
+  return res.json();
 }

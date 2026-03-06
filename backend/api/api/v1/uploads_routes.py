@@ -63,7 +63,6 @@ async def upload_washer_xml(
     filename = _safe_filename(file.filename or "upload.xml")
 
     if file.content_type not in _ALLOWED_CONTENT_TYPES:
-        # content_type is unreliable; allow based on extension
         if not filename.lower().endswith(".xml"):
             raise HTTPException(
                 status_code=415,
@@ -82,7 +81,6 @@ async def upload_washer_xml(
     )
     base_dir.mkdir(parents=True, exist_ok=True)
 
-    # Collision-safe filename
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")
     cycle_part = f"__cycle-{_safe_segment(cycle_number)}" if cycle_number else ""
     stored_name = f"{ts}{cycle_part}__{filename}"
@@ -97,7 +95,7 @@ async def upload_washer_xml(
     try:
         with stored_path.open("wb") as out:
             while True:
-                chunk = await file.read(1024 * 1024)  # 1MB chunks
+                chunk = await file.read(1024 * 1024)
                 if not chunk:
                     break
                 written += len(chunk)
@@ -158,14 +156,20 @@ async def upload_washer_xml(
                 environment_id=environment_id,
                 machine_id=machine_id,
             )
+
+            # ✅ ✅ ✅ CRITICAL LINE (this was missing)
+            conn.commit()
+
         except Exception as parse_err:
-            # IMPORTANT:
-            # Parsing errors are recorded in DB but must NOT
-            # break the upload request.
-            # This allows retry / re-parse later.
-            print(f"[WARN] Washer XML parsing failed for upload {record['id']}: {parse_err}")
+            # Roll back parsing work only
+            conn.rollback()
+
+            # Parsing errors must NOT break upload
+            print(
+                f"[WARN] Washer XML parsing failed for upload {record['id']}: {parse_err}"
+            )
 
     finally:
-        conn.close()    
+        conn.close()
 
     return {"ok": True, **record}
