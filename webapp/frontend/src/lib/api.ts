@@ -365,19 +365,31 @@ export async function listWasherXmlUploads(params?: {
 }
 
 // ---------- Washer Cycles ----------
+export type WasherCycleStage = {
+  started_at?: string;
+  ended_at?: string;
+  temperature_c?: number;
+};
+
 export type WasherCycle = {
   id: number;
   cycle_number: number | null;
-  program_name: string | null;
-
-  started_at: string;
-  ended_at: string | null;        // ✅ added
-
-  machine_id: number;
   machine_name: string;
-  original_filename?: string | null;
+  program_name: string | null;
+  started_at?: string;
+  ended_at?: string | null;
+  duration_sec?: number | null;
+  result: boolean | null;
 
-  result: boolean | null;         // ✅ corrected
+  extra?: {
+    stages?: {
+      pre_wash?: WasherCycleStage;
+      wash?: WasherCycleStage;
+      rinse?: WasherCycleStage;
+      disinfection?: WasherCycleStage;
+      drying?: WasherCycleStage;
+    };
+  };
 };
 
 export async function listWasherCycles(): Promise<WasherCycle[]> {

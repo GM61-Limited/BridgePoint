@@ -1,63 +1,85 @@
 import re
+import json
 from datetime import datetime, timezone
 from typing import Dict
 
-
-# --------------------------------------------------
-# XML extraction helpers
-# --------------------------------------------------
 
 _SIMPLE_KV_PATTERN = re.compile(
     r"<string>(?P<key>[^<]+)</string>\s*<[^>]+>(?P<value>[^<]+)</[^>]+>",
     re.IGNORECASE,
 )
 
-_DATE_PATTERN_TEMPLATE = (
-    r"<string>{key}</string>.*?<long>(?P<value>\d+)</long>"
+_DATE_KV_PATTERN = re.compile(
+    r"<string>(?P<key>[^<]+)</string>.*?<long>(?P<value>-?\d+)</long>",
+    re.IGNORECASE | re.DOTALL,
 )
 
 
 def _extract_xml_map(xml_path: str) -> Dict[str, str]:
-    """
-    Extract key/value pairs from Java XMLDecoder washer files.
-
-    Strategy:
-      - Regex-based (intentionally)
-      - UTF-safe (bytes + ignore errors)
-      - Handles:
-          * simple values (string/int/boolean)
-          * nested date values (epoch millis in <long>)
-    """
-
     with open(xml_path, "rb") as f:
         raw = f.read()
 
     text = raw.decode("utf-8", errors="ignore")
     data: Dict[str, str] = {}
 
-    # ----------------------------------------------
-    # 1) Simple direct values (res, programNo, etc.)
-    # ----------------------------------------------
-    for match in _SIMPLE_KV_PATTERN.finditer(text):
-        data[match.group("key")] = match.group("value")
+    for m in _SIMPLE_KV_PATTERN.finditer(text):
+        data[m.group("key")] = m.group("value")
 
-    # ----------------------------------------------
-    # 2) Date fields (nested <long>)
-    # ----------------------------------------------
-    for key in ("datum", "chargende"):
-        pattern = re.compile(
-            _DATE_PATTERN_TEMPLATE.format(key=key),
-            re.IGNORECASE | re.DOTALL,
-        )
-        m = pattern.search(text)
-        if m:
-            data[key] = m.group("value")
+    for m in _DATE_KV_PATTERN.finditer(text):
+        data[m.group("key")] = m.group("value")
 
     return data
 
 
+def _parse_epoch(value):
+    try:
+        value = int(value)
+        if value <= 0:
+            return None
+        if value < 10_000_000_000:
+            return datetime.fromtimestamp(value, tz=timezone.utc)
+        return datetime.fromtimestamp(value / 1000, tz=timezone.utc)
+    except Exception:
+        return None
+
+
+def _first_present(xml: Dict[str, str], *keys):
+    for k in keys:
+        if k in xml and xml.get(k) not in ("", None):
+            return xml.get(k)
+    return None
+
+
+def _parse_result(xml: Dict[str, str], xml_path: str):
+    val = xml.get("res", "").lower()
+    if val == "true":
+        return True
+    if val == "false":
+        return False
+    if xml_path.endswith("+.xml"):
+        return True
+    if xml_path.endswith("-.xml"):
+        return False
+    return None
+
+
+def _canonical_stage(name: str):
+    n = name.lower()
+    if "pre" in n:
+        return "pre_wash"
+    if "wash" in n:
+        return "wash"
+    if "rinse" in n:
+        return "rinse"
+    if "disinfect" in n:
+        return "disinfection"
+    if "dry" in n:
+        return "drying"
+    return None
+
+
 # --------------------------------------------------
-# Phase 1 parser
+# PARSER
 # --------------------------------------------------
 
 def parse_washer_xml_phase1(
@@ -67,84 +89,92 @@ def parse_washer_xml_phase1(
     environment_id: int,
     machine_id: int,
 ):
-    """
-    PHASE 1 — STABLE + EXTENDED
-
-    Parses:
-      - cycle_number
-      - program_name
-      - program_number
-      - started_at
-      - ended_at
-      - duration_sec
-      - result (BOOLEAN)
-
-    NO commits.
-    NO rollbacks.
-    """
-
     cur = conn.cursor()
     xml = _extract_xml_map(xml_path)
 
-    # --------------------------------------------------
-    # Cycle number
-    # --------------------------------------------------
-    cycle_number = None
     try:
-        cycle_number = int(xml["chargnr"])
+        cycle_number = int(xml.get("chargnr"))
     except Exception:
-        pass
+        cycle_number = None
 
-    # --------------------------------------------------
-    # Program
-    # --------------------------------------------------
     program_name = xml.get("programmname")
 
-    program_number = None
     try:
-        program_number = int(xml["programNo"])
+        program_number = int(xml.get("programNo"))
     except Exception:
-        pass
+        program_number = None
 
-    # --------------------------------------------------
-    # Start / End times
-    # --------------------------------------------------
-    started_at = None
-    ended_at = None
+    result = _parse_result(xml, xml_path)
 
-    try:
-        started_at = datetime.fromtimestamp(
-            int(xml["datum"]) / 1000,
-            tz=timezone.utc,
+    extra = {"stages": {}}
+    stage_start_times = []
+    stage_end_times = []
+
+    for stage_idx in range(0, 6):
+        stage_name = xml.get(f"wiStageName:{stage_idx}")
+        if not stage_name:
+            continue
+
+        canonical = _canonical_stage(stage_name)
+        if not canonical:
+            continue
+
+        start_val = _first_present(
+            xml,
+            f"wiStage1Start:{stage_idx}",
+            f"wiStageStart:{stage_idx}",
         )
-    except Exception:
-        pass
-
-    try:
-        ended_at = datetime.fromtimestamp(
-            int(xml["chargende"]) / 1000,
-            tz=timezone.utc,
+        end_val = _first_present(
+            xml,
+            f"wiStage1End:{stage_idx}",
+            f"wiStageEnd:{stage_idx}",
         )
-    except Exception:
-        pass
+
+        stage_started_at = _parse_epoch(start_val)
+        stage_ended_at = _parse_epoch(end_val)
+
+        if stage_started_at:
+            stage_start_times.append(stage_started_at)
+        if stage_ended_at:
+            stage_end_times.append(stage_ended_at)
+
+        # ✅ EXPANDED temperature keys
+        temp_val = _first_present(
+            xml,
+            f"wiStageSetTemp:{stage_idx}",
+            f"wiStageTempMax:{stage_idx}",
+            f"wiStageTempMean:{stage_idx}",
+            f"wiTempMax:{stage_idx}",
+            f"wiTempMean:{stage_idx}",
+            f"wiTemp:{stage_idx}",
+            f"wiStageTemperature:{stage_idx}",
+            f"wiDisTemp:{stage_idx}",
+        )
+
+        try:
+            temperature_c = int(float(temp_val)) if temp_val is not None else None
+        except Exception:
+            temperature_c = None
+
+        stage_data = {}
+
+        if stage_started_at:
+            stage_data["started_at"] = stage_started_at.isoformat()
+        if stage_ended_at:
+            stage_data["ended_at"] = stage_ended_at.isoformat()
+        if temperature_c is not None:
+            stage_data["temperature_c"] = temperature_c
+
+        if stage_data:
+            extra["stages"][canonical] = stage_data
+
+    started_at = min(stage_start_times) if stage_start_times else None
+    ended_at = max(stage_end_times) if stage_end_times else None
 
     duration_sec = None
-    if started_at and ended_at:
+    if started_at and ended_at and ended_at > started_at:
         duration_sec = int((ended_at - started_at).total_seconds())
 
-    # --------------------------------------------------
-    # Result (BOOLEAN)
-    # --------------------------------------------------
-    result = None
-    val = xml.get("res", "").lower()
-    if val == "true":
-        result = True
-    elif val == "false":
-        result = False
-
-    # --------------------------------------------------
-    # Insert
-    # --------------------------------------------------
     cur.execute(
         """
         INSERT INTO washer_cycles (
@@ -157,9 +187,11 @@ def parse_washer_xml_phase1(
             started_at,
             ended_at,
             duration_sec,
-            result
+            result,
+            extra
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (machine_id, cycle_number) DO NOTHING
         """,
         (
             environment_id,
@@ -172,12 +204,10 @@ def parse_washer_xml_phase1(
             ended_at,
             duration_sec,
             result,
+            json.dumps(extra),
         ),
     )
 
-    # --------------------------------------------------
-    # Mark upload parsed
-    # --------------------------------------------------
     cur.execute(
         """
         UPDATE washer_xml_uploads

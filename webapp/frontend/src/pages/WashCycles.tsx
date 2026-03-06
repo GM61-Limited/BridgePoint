@@ -2,13 +2,24 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, listWasherCycles, type WasherCycle } from "../lib/api";
 
+/* --------------------------------------------------
+   Helpers
+-------------------------------------------------- */
+
+const formatDateTime = (value?: string | null) =>
+  value ? new Date(value).toLocaleString() : "—";
+
+/* --------------------------------------------------
+   Table row model (UI-safe)
+-------------------------------------------------- */
+
 type WashCycleRow = {
   id: number;
   cycleNo: number | null;
   program: string;
   machine: string;
-  start: string; // ISO
-  end: string | null; // ISO
+  start?: string | null;
+  end?: string | null;
   result: "PASS" | "FAIL" | "UNKNOWN";
 };
 
@@ -22,8 +33,8 @@ function toRow(c: WasherCycle): WashCycleRow {
     cycleNo: c.cycle_number,
     program: c.program_name ?? "—",
     machine: c.machine_name,
-    start: c.started_at,
-    end: c.ended_at,
+    start: c.started_at ?? null,
+    end: c.ended_at ?? null,
     result,
   };
 }
@@ -86,9 +97,11 @@ export default function WashCycles() {
       if (filterDevice !== "ALL" && r.machine !== filterDevice) return false;
       if (filterProgram !== "ALL" && r.program !== filterProgram) return false;
 
-      if (fromDate && new Date(r.start) < new Date(fromDate)) return false;
+      if (fromDate && r.start) {
+        if (new Date(r.start) < new Date(fromDate)) return false;
+      }
 
-      if (toDate) {
+      if (toDate && r.start) {
         const to = new Date(toDate);
         to.setHours(23, 59, 59, 999);
         if (new Date(r.start) > to) return false;
@@ -258,10 +271,8 @@ export default function WashCycles() {
                   <td>{r.cycleNo ? `#${r.cycleNo}` : "—"}</td>
                   <td>{r.machine}</td>
                   <td>{r.program}</td>
-                  <td>{new Date(r.start).toLocaleString()}</td>
-                  <td>
-                    {r.end ? new Date(r.end).toLocaleString() : "—"}
-                  </td>
+                  <td>{formatDateTime(r.start)}</td>
+                  <td>{formatDateTime(r.end)}</td>
                   <td>
                     <span
                       className={

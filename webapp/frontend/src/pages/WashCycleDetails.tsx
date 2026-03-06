@@ -54,6 +54,30 @@ export default function WashCycleDetails() {
     return <div className="container py-4">Loading…</div>;
   }
 
+  /* --------------------------------------------------
+     Helpers for critical params
+  -------------------------------------------------- */
+
+  const stages = cycle.extra?.stages ?? {};
+
+  const formatDateTime = (value?: string) =>
+    value ? new Date(value).toLocaleString() : "—";
+
+  const formatTemp = (value?: number) =>
+    value !== undefined ? `${value} °C` : "—";
+
+  const formatStartEnd = (stage?: any) => {
+    if (!stage) return "—";
+    const start = formatDateTime(stage.started_at);
+    const end = formatDateTime(stage.ended_at);
+    if (start === "—" && end === "—") return "—";
+    return `${start} → ${end}`;
+  };
+
+  /* --------------------------------------------------
+     Telemetry chart
+  -------------------------------------------------- */
+
   const labels = points.map((p) =>
     new Date(p.timestamp).toLocaleTimeString([], {
       hour: "2-digit",
@@ -131,6 +155,9 @@ export default function WashCycleDetails() {
         Cycle {cycle.cycle_number ? `#${cycle.cycle_number}` : ""}
       </h1>
 
+      {/* ===============================
+          Cycle Summary
+         =============================== */}
       <dl className="row mt-3">
         <dt className="col-sm-3">Machine</dt>
         <dd className="col-sm-9">{cycle.machine_name}</dd>
@@ -140,7 +167,7 @@ export default function WashCycleDetails() {
 
         <dt className="col-sm-3">Started</dt>
         <dd className="col-sm-9">
-          {new Date(cycle.started_at).toLocaleString()}
+          {formatDateTime(cycle.started_at)}
         </dd>
 
         <dt className="col-sm-3">Result</dt>
@@ -157,6 +184,94 @@ export default function WashCycleDetails() {
         </dd>
       </dl>
 
+      {/* ===============================
+          Critical Parameters
+         =============================== */}
+      <div className="card mt-4">
+        <div className="card-body">
+          <h2 className="h6 mb-3">Wash Cycle Critical Parameters</h2>
+
+          <table className="table table-sm mb-0">
+            <tbody>
+              <tr>
+                <td>Pre Wash Start / End time</td>
+                <td className="text-end">
+                  {formatStartEnd(stages.pre_wash)}
+                </td>
+              </tr>
+              <tr>
+                <td>Pre Wash Temp</td>
+                <td className="text-end">
+                  {formatTemp(stages.pre_wash?.temperature_c)}
+                </td>
+              </tr>
+
+              <tr>
+                <td>Wash Start / End time</td>
+                <td className="text-end">
+                  {formatStartEnd(stages.wash)}
+                </td>
+              </tr>
+              <tr>
+                <td>Wash Temp</td>
+                <td className="text-end">
+                  {formatTemp(stages.wash?.temperature_c)}
+                </td>
+              </tr>
+
+              <tr>
+                <td>Rinse Start / End time</td>
+                <td className="text-end">
+                  {formatStartEnd(stages.rinse)}
+                </td>
+              </tr>
+              <tr>
+                <td>Rinse Temp</td>
+                <td className="text-end">
+                  {formatTemp(stages.rinse?.temperature_c)}
+                </td>
+              </tr>
+
+              <tr>
+                <td>Disinfection Start / End time</td>
+                <td className="text-end">
+                  {formatStartEnd(stages.disinfection)}
+                </td>
+              </tr>
+              <tr>
+                <td>Disinfection Temp</td>
+                <td className="text-end">
+                  {formatTemp(stages.disinfection?.temperature_c)}
+                </td>
+              </tr>
+
+              <tr>
+                <td>Drying Start / End time</td>
+                <td className="text-end">
+                  {formatStartEnd(stages.drying)}
+                </td>
+              </tr>
+              <tr>
+                <td>Drying Temp</td>
+                <td className="text-end">
+                  {formatTemp(stages.drying?.temperature_c)}
+                </td>
+              </tr>
+
+              <tr>
+                <td>Pass / Fail</td>
+                <td className="text-end fw-bold">
+                  {validation}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ===============================
+          Telemetry Chart
+         =============================== */}
       <div className="card mt-4">
         <div className="card-body">
           <h2 className="h6 mb-3">Cycle telemetry</h2>
