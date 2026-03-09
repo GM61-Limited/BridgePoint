@@ -29,8 +29,6 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # One small debug step (kept intentionally minimal):
-      # proves subscription context + that the container app is visible before we attempt update.
       - name: Debug Azure context (minimal)
         run: |
           set -e
@@ -61,12 +59,20 @@ jobs:
             --file webapp/Dockerfile \
             webapp
 
+      # ✅ FIXED: update each container explicitly using --container-name
       - name: Update Container App images to v${{ github.run_number }}
         run: |
           set -e
           echo "Updating ${CONTAINERAPP_NAME} to v${{ github.run_number }}..."
+
           az containerapp update \
             --resource-group "${RESOURCE_GROUP}" \
             --name "${CONTAINERAPP_NAME}" \
-            --set properties.template.containers[0].image="${ACR_LOGIN_SERVER}/bridgepoint-frontend:v${{ github.run_number }}" \
-            --set properties.template.containers[1].image="${ACR_LOGIN_SERVER}/bridgepoint-backend:v${{ github.run_number }}"
+            --container-name "frontend" \
+            --image "${ACR_LOGIN_SERVER}/bridgepoint-frontend:v${{ github.run_number }}"
+
+          az containerapp update \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${CONTAINERAPP_NAME}" \
+            --container-name "backend" \
+            --image "${ACR_LOGIN_SERVER}/bridgepoint-backend:v${{ github.run_number }}"
