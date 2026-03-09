@@ -1,8 +1,8 @@
-name: Build & Deploy BridgePoint (ACA multi-container, auto vN tags)
+name: Build & Deploy BridgePoint (ACA multi-container, auto on push)
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
 
 permissions:
   id-token: write
@@ -29,10 +29,10 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Debug Azure context (minimal)
+      # Quick sanity check so failures are obvious early
+      - name: Verify target Container App exists
         run: |
           set -e
-          echo "Deploy version: v${{ github.run_number }}"
           az account show -o table
           az containerapp show -g "${RESOURCE_GROUP}" -n "${CONTAINERAPP_NAME}" -o none
 
@@ -41,6 +41,7 @@ jobs:
           set -e
           az acr login --name "${ACR_NAME}"
 
+      # Tag images as v{run_number} so you get nice v1/v2/v3 style versions
       - name: Build & Push Backend (ACR build) - v${{ github.run_number }}
         run: |
           set -e
@@ -59,11 +60,11 @@ jobs:
             --file webapp/Dockerfile \
             webapp
 
-      # ✅ FIXED: update each container explicitly using --container-name
-      - name: Update Container App images to v${{ github.run_number }}
+      # IMPORTANT: for multi-container apps, the CLI requires --container-name for each container update
+      - name: Deploy to Azure Container App (update both containers)
         run: |
           set -e
-          echo "Updating ${CONTAINERAPP_NAME} to v${{ github.run_number }}..."
+          echo "Deploying BridgePoint v${{ github.run_number }}..."
 
           az containerapp update \
             --resource-group "${RESOURCE_GROUP}" \
