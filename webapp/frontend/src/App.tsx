@@ -33,6 +33,9 @@ import Maintenance from "./pages/Maintenance";
 // ✅ NEW: Logs / Audit page (core app, not machine-specific)
 import LogsPage from "./pages/LogsPage";
 
+// ✅ NEW: Help page (core app)
+import HelpPage from "./pages/HelpPage";
+
 // Connectors
 import Connectors from "./pages/connectors";
 
@@ -133,6 +136,9 @@ export default function App() {
             {/* ✅ NEW: Core app Logs (not machine-specific) */}
             <Route path="logs" element={<LogsPage />} />
 
+            {/* ✅ NEW: Help page (core app) */}
+            <Route path="help" element={<HelpPage />} />
+
             {/* Machine Monitoring */}
             <Route
               path="machines"
@@ -174,7 +180,10 @@ export default function App() {
             />
 
             {/* Backwards compatibility */}
-            <Route path="washers" element={<Navigate to="/machines" replace />} />
+            <Route
+              path="washers"
+              element={<Navigate to="/machines" replace />}
+            />
 
             <Route
               path="devices/:deviceId"

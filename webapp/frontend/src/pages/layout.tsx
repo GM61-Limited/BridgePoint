@@ -315,6 +315,16 @@ export default function Layout() {
             <span className="sidebar-label">Logs</span>
           </NavLink>
 
+          {/* ✅ NEW: Help (core app) */}
+          <NavLink
+            to="/help"
+            title={collapsed ? "Help" : undefined}
+            className={({ isActive }) => navClass(isActive)}
+          >
+            <i className={iconCls("bi-question-circle")} aria-hidden="true" />
+            <span className="sidebar-label">Help</span>
+          </NavLink>
+
           {modulesError && (
             <div className="px-3 pt-2 text-warning small">
               <i className="bi bi-exclamation-triangle me-1" aria-hidden="true" />

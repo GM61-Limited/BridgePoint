@@ -493,3 +493,17 @@ export async function createMaintenanceLog(payload: {
 export async function deleteMaintenanceLog(id: string) {
   await api.delete<void>(`/v1/maintenance/${encodeURIComponent(id)}`);
 }
+
+export async function updateMaintenanceLog(
+  id: string,
+  payload: {
+    machine_id: number;
+    reason: string;
+    started_at: string;
+    ended_at: string | null;
+    notes: string | null;
+  }
+): Promise<MaintenanceLog> {
+  const { data } = await api.put(`/v1/maintenance/${id}`, payload);
+  return data;
+}

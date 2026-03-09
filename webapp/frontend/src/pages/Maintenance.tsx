@@ -6,27 +6,41 @@ import {
   getApiErrorMessage,
   listMachines,
   listMaintenanceLogs,
+  updateMaintenanceLog,
   type Machine,
   type MaintenanceLog,
 } from "../lib/api";
 
 /**
  * Maintenance
- * - Lets engineers log maintenance against a machine
- * - Stored in the database via API (/api/v1/maintenance through axios baseURL "/api")
+ * - Audit log table always visible
+ * - "Raise maintenance issue" opens modal
+ * - "Edit" opens modal with populated details
  */
 
 function toIsoFromDatetimeLocal(value: string): string {
-  // datetime-local -> local time; convert to ISO (UTC)
   const d = new Date(value);
   return d.toISOString();
 }
 
+function toDatetimeLocalFromIso(iso?: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  const mm = pad(d.getMonth() + 1);
+  const dd = pad(d.getDate());
+  const hh = pad(d.getHours());
+  const min = pad(d.getMinutes());
+  return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
+}
+
 function formatDateTime(iso?: string | null): string {
   if (!iso) return "—";
-  const d = new Date(iso);
-  return d.toLocaleString();
+  return new Date(iso).toLocaleString();
 }
+
+type ModalMode = "create" | "edit";
 
 export default function Maintenance() {
   const [machines, setMachines] = useState<Machine[]>([]);
@@ -37,16 +51,33 @@ export default function Maintenance() {
 
   const [status, setStatus] = useState<string>("");
 
-  // Form state
+  // Filters
+  const [filterMachineId, setFilterMachineId] = useState<number | "ALL">("ALL");
+  const [query, setQuery] = useState<string>("");
+
+  // Modal state
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState<ModalMode>("create");
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  // Form state (lives in parent for simplicity)
   const [machineId, setMachineId] = useState<number | "">("");
   const [reason, setReason] = useState<string>("");
   const [startedAtLocal, setStartedAtLocal] = useState<string>("");
   const [endedAtLocal, setEndedAtLocal] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
 
-  // Filters
-  const [filterMachineId, setFilterMachineId] = useState<number | "ALL">("ALL");
-  const [query, setQuery] = useState<string>("");
+  const isEditing = modalMode === "edit" && editingId !== null;
+
+  // Disable body scroll while modal is open
+  useEffect(() => {
+    if (!modalOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [modalOpen]);
 
   // Load machines once
   useEffect(() => {
@@ -80,7 +111,8 @@ export default function Maintenance() {
         setStatus("");
 
         try {
-          const machine_id = filterMachineId === "ALL" ? undefined : Number(filterMachineId);
+          const machine_id =
+            filterMachineId === "ALL" ? undefined : Number(filterMachineId);
           const q = query.trim() ? query.trim() : undefined;
 
           const data = await listMaintenanceLogs({
@@ -107,36 +139,74 @@ export default function Maintenance() {
     };
   }, [filterMachineId, query]);
 
-  const selectedMachine = useMemo(() => {
-    if (machineId === "") return null;
-    return machines.find((m) => m.id === machineId) ?? null;
-  }, [machineId, machines]);
-
   const filterMachine = useMemo(() => {
     if (filterMachineId === "ALL") return null;
     return machines.find((m) => m.id === filterMachineId) ?? null;
   }, [filterMachineId, machines]);
 
+  const selectedMachine = useMemo(() => {
+    if (machineId === "") return null;
+    return machines.find((m) => m.id === machineId) ?? null;
+  }, [machineId, machines]);
+
   const filteredLogs = useMemo(() => {
-    // Backend already filters by q/machine_id; keep stable ordering here.
     return [...logs].sort(
-      (a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
+      (a, b) =>
+        new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
     );
   }, [logs]);
 
-  function resetForm(keepMachine = true) {
+  function resetForm(keepMachine = false) {
     if (!keepMachine) setMachineId("");
     setReason("");
     setStartedAtLocal("");
     setEndedAtLocal("");
     setNotes("");
+    setEditingId(null);
+    setModalMode("create");
+  }
+
+  function openCreateModal() {
+    resetForm(false);
+    setModalMode("create");
+    setEditingId(null);
+    setModalOpen(true);
+    setStatus("");
+  }
+
+  function openEditModal(log: MaintenanceLog) {
+    setModalMode("edit");
+    setEditingId(log.id);
+
+    // Prefer machine_id if present on your MaintenanceLog; fallback to matching name
+    // @ts-ignore
+    const mid: number | undefined = (log as any).machine_id;
+    if (typeof mid === "number") {
+      setMachineId(mid);
+    } else {
+      const m = machines.find((x) => x.machine_name === log.machine_name);
+      setMachineId(m?.id ?? "");
+    }
+
+    setReason(log.reason ?? "");
+    setStartedAtLocal(toDatetimeLocalFromIso(log.started_at));
+    setEndedAtLocal(toDatetimeLocalFromIso(log.ended_at));
+    setNotes(log.notes ?? "");
+
+    setModalOpen(true);
+    setStatus("");
+  }
+
+  function closeModal() {
+    setModalOpen(false);
+    // do not auto-reset here so user doesn't lose input if they accidentally click backdrop
+    // but you can choose to reset on close if you prefer
   }
 
   function validate(): string | null {
     if (machineId === "") return "Please select a machine.";
     if (!reason.trim()) return "Please enter a reason.";
     if (!startedAtLocal) return "Please enter a start date/time.";
-    // End is optional, but if supplied it must be after start
     if (endedAtLocal) {
       const start = new Date(startedAtLocal).getTime();
       const end = new Date(endedAtLocal).getTime();
@@ -149,10 +219,16 @@ export default function Maintenance() {
     setStatus("");
     setLoadingLogs(true);
     try {
-      const machine_id = filterMachineId === "ALL" ? undefined : Number(filterMachineId);
+      const machine_id =
+        filterMachineId === "ALL" ? undefined : Number(filterMachineId);
       const q = query.trim() ? query.trim() : undefined;
 
-      const data = await listMaintenanceLogs({ machine_id, q, limit: 200, offset: 0 });
+      const data = await listMaintenanceLogs({
+        machine_id,
+        q,
+        limit: 200,
+        offset: 0,
+      });
       setLogs(data);
 
       setStatus("Refreshed ✅");
@@ -164,7 +240,7 @@ export default function Maintenance() {
     }
   }
 
-  async function addLog() {
+  async function submitModal() {
     setStatus("");
 
     const err = validate();
@@ -173,23 +249,37 @@ export default function Maintenance() {
       return;
     }
 
+    const payload = {
+      machine_id: Number(machineId),
+      reason: reason.trim(),
+      started_at: toIsoFromDatetimeLocal(startedAtLocal),
+      ended_at: endedAtLocal ? toIsoFromDatetimeLocal(endedAtLocal) : null,
+      notes: notes.trim() ? notes.trim() : null,
+    };
+
     try {
-      const created = await createMaintenanceLog({
-        machine_id: Number(machineId),
-        reason: reason.trim(),
-        started_at: toIsoFromDatetimeLocal(startedAtLocal),
-        ended_at: endedAtLocal ? toIsoFromDatetimeLocal(endedAtLocal) : null,
-        notes: notes.trim() ? notes.trim() : null,
-      });
+      if (!isEditing) {
+        const created = await createMaintenanceLog(payload);
+        setLogs((prev) => [created, ...prev]);
 
-      // Optimistic prepend
-      setLogs((prev) => [created, ...prev]);
+        setStatus("Maintenance issue raised ✅");
+        setModalOpen(false);
+        resetForm(false);
+        setTimeout(() => setStatus(""), 1200);
+      } else {
+        const updated = await updateMaintenanceLog(editingId!, payload);
+        setLogs((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
 
-      setStatus("Maintenance log added ✅");
-      resetForm(true);
-      setTimeout(() => setStatus(""), 1200);
+        setStatus("Maintenance entry updated ✅");
+        setModalOpen(false);
+        resetForm(false);
+        setTimeout(() => setStatus(""), 1200);
+      }
     } catch (err2) {
-      setStatus(getApiErrorMessage(err2) || "Failed to create maintenance log.");
+      setStatus(
+        getApiErrorMessage(err2) ||
+          (isEditing ? "Failed to update maintenance log." : "Failed to create maintenance log.")
+      );
     }
   }
 
@@ -200,6 +290,13 @@ export default function Maintenance() {
     try {
       await deleteMaintenanceLog(id);
       setLogs((prev) => prev.filter((x) => x.id !== id));
+
+      // If it was open in the modal, close
+      if (editingId === id) {
+        setModalOpen(false);
+        resetForm(false);
+      }
+
       setStatus("Deleted ✅");
       setTimeout(() => setStatus(""), 1200);
     } catch (err) {
@@ -208,7 +305,9 @@ export default function Maintenance() {
   }
 
   function exportJson() {
-    const blob = new Blob([JSON.stringify(filteredLogs, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify(filteredLogs, null, 2)], {
+      type: "application/json",
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -226,16 +325,32 @@ export default function Maintenance() {
         <div>
           <h1 className="h4 mb-1">Maintenance</h1>
           <div className="text-secondary small">
-            Log maintenance work performed on machines. This creates an audit trail and can feed into Health later.
+            Raise and track maintenance work performed on machines (audit trail).
           </div>
         </div>
 
         <div className="d-flex gap-2">
-          <button className="btn btn-outline-secondary btn-sm" onClick={exportJson} disabled={!filteredLogs.length}>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={openCreateModal}
+            disabled={loadingMachines}
+          >
+            <i className="bi bi-plus-circle" aria-hidden="true" /> Raise maintenance issue
+          </button>
+
+          <button
+            className="btn btn-outline-secondary btn-sm"
+            onClick={exportJson}
+            disabled={!filteredLogs.length}
+          >
             <i className="bi bi-download" aria-hidden="true" /> Export JSON
           </button>
 
-          <button className="btn btn-outline-primary btn-sm" onClick={refreshLogs} disabled={loadingLogs}>
+          <button
+            className="btn btn-outline-primary btn-sm"
+            onClick={refreshLogs}
+            disabled={loadingLogs}
+          >
             <i className="bi bi-arrow-clockwise" aria-hidden="true" /> Refresh
           </button>
         </div>
@@ -246,97 +361,6 @@ export default function Maintenance() {
           {status}
         </div>
       )}
-
-      {/* Create log */}
-      <div className="card border-secondary mb-3">
-        <div className="card-header d-flex align-items-center gap-2">
-          <i className="bi bi-wrench-adjustable" aria-hidden="true" />
-          <strong>Log maintenance</strong>
-        </div>
-
-        <div className="card-body">
-          <div className="row g-3">
-            <div className="col-md-6">
-              <label className="form-label">Machine *</label>
-              <select
-                className="form-select"
-                value={machineId}
-                disabled={loadingMachines}
-                onChange={(e) => setMachineId(e.target.value ? Number(e.target.value) : "")}
-              >
-                <option value="">{loadingMachines ? "Loading machines…" : "Select a machine…"}</option>
-                {machines.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.machine_name} ({m.machine_code})
-                  </option>
-                ))}
-              </select>
-
-              {selectedMachine && (
-                <div className="text-secondary small mt-1">
-                  {selectedMachine.manufacturer ?? "—"}
-                  {selectedMachine.model ? ` • ${selectedMachine.model}` : ""}
-                  {selectedMachine.location ? ` • ${selectedMachine.location}` : ""}
-                </div>
-              )}
-            </div>
-
-            <div className="col-md-6">
-              <label className="form-label">Reason *</label>
-              <input
-                className="form-control"
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder="e.g. Preventative service, Pump replaced, Leak investigated"
-              />
-            </div>
-
-            <div className="col-md-6">
-              <label className="form-label">Start date/time *</label>
-              <input
-                type="datetime-local"
-                className="form-control"
-                value={startedAtLocal}
-                onChange={(e) => setStartedAtLocal(e.target.value)}
-              />
-            </div>
-
-            <div className="col-md-6">
-              <label className="form-label">End date/time</label>
-              <input
-                type="datetime-local"
-                className="form-control"
-                value={endedAtLocal}
-                onChange={(e) => setEndedAtLocal(e.target.value)}
-              />
-              <div className="text-secondary small mt-1">Optional. Leave blank if the work is ongoing.</div>
-            </div>
-
-            <div className="col-12">
-              <label className="form-label">Notes</label>
-              <textarea
-                className="form-control"
-                rows={3}
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Any observations, parts used, test results, follow-ups…"
-              />
-            </div>
-          </div>
-
-          <div className="d-flex justify-content-between align-items-center mt-3">
-            <div className="text-secondary small">Stored in the database (shared audit trail).</div>
-            <div className="d-flex gap-2">
-              <button className="btn btn-primary btn-sm" onClick={addLog}>
-                <i className="bi bi-plus-circle" aria-hidden="true" /> Add entry
-              </button>
-              <button className="btn btn-outline-secondary btn-sm" onClick={() => resetForm(false)}>
-                Reset
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
 
       {/* Audit log */}
       <div className="card border-secondary">
@@ -353,7 +377,9 @@ export default function Maintenance() {
               className="form-select form-select-sm"
               style={{ width: 220 }}
               value={filterMachineId === "ALL" ? "ALL" : String(filterMachineId)}
-              onChange={(e) => setFilterMachineId(e.target.value === "ALL" ? "ALL" : Number(e.target.value))}
+              onChange={(e) =>
+                setFilterMachineId(e.target.value === "ALL" ? "ALL" : Number(e.target.value))
+              }
               disabled={loadingMachines}
             >
               <option value="ALL">All machines</option>
@@ -377,7 +403,8 @@ export default function Maintenance() {
         <div className="card-body p-0">
           {filterMachine && (
             <div className="px-3 py-2 border-bottom text-secondary small">
-              Filtered to: <span className="fw-semibold text-body">{filterMachine.machine_name}</span>
+              Filtered to:{" "}
+              <span className="fw-semibold text-body">{filterMachine.machine_name}</span>
             </div>
           )}
 
@@ -390,7 +417,7 @@ export default function Maintenance() {
                   <th style={{ width: "18%" }}>Start</th>
                   <th style={{ width: "18%" }}>End</th>
                   <th>Notes</th>
-                  <th className="text-end" style={{ width: "8%" }}>
+                  <th className="text-end" style={{ width: "10%" }}>
                     Actions
                   </th>
                 </tr>
@@ -410,13 +437,23 @@ export default function Maintenance() {
                     </td>
                     <td className="text-secondary">{l.notes ?? "—"}</td>
                     <td className="text-end">
-                      <button
-                        className="btn btn-outline-danger btn-sm"
-                        onClick={() => deleteLog(l.id)}
-                        title="Delete"
-                      >
-                        <i className="bi bi-trash" aria-hidden="true" />
-                      </button>
+                      <div className="btn-group" role="group">
+                        <button
+                          className="btn btn-outline-secondary btn-sm"
+                          onClick={() => openEditModal(l)}
+                          title="Edit"
+                        >
+                          <i className="bi bi-pencil" aria-hidden="true" />
+                        </button>
+
+                        <button
+                          className="btn btn-outline-danger btn-sm"
+                          onClick={() => deleteLog(l.id)}
+                          title="Delete"
+                        >
+                          <i className="bi bi-trash" aria-hidden="true" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -424,7 +461,7 @@ export default function Maintenance() {
                 {!loadingLogs && filteredLogs.length === 0 && (
                   <tr>
                     <td colSpan={6} className="text-center text-secondary py-4">
-                      No maintenance entries yet. Add one above to start the audit log.
+                      No maintenance entries yet. Click “Raise maintenance issue” to add one.
                     </td>
                   </tr>
                 )}
@@ -437,6 +474,142 @@ export default function Maintenance() {
           </div>
         </div>
       </div>
+
+      {/* Modal */}
+      {modalOpen && (
+        <>
+          {/* Backdrop */}
+          <div
+            className="modal-backdrop fade show"
+            onClick={closeModal}
+          />
+
+          {/* Modal dialog */}
+          <div
+            className="modal fade show"
+            style={{ display: "block" }}
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="modal-dialog modal-lg modal-dialog-scrollable">
+              <div className="modal-content">
+                <div className="modal-header">
+                  <div className="d-flex align-items-center gap-2">
+                    <i className="bi bi-wrench-adjustable" aria-hidden="true" />
+                    <h5 className="modal-title mb-0">
+                      {isEditing ? "Edit maintenance entry" : "Raise maintenance issue"}
+                    </h5>
+                    {isEditing && <span className="badge bg-warning text-dark">Editing</span>}
+                  </div>
+
+                  <button
+                    type="button"
+                    className="btn-close"
+                    aria-label="Close"
+                    onClick={closeModal}
+                  />
+                </div>
+
+                <div className="modal-body">
+                  <div className="row g-3">
+                    <div className="col-md-6">
+                      <label className="form-label">Machine *</label>
+                      <select
+                        className="form-select"
+                        value={machineId}
+                        disabled={loadingMachines}
+                        onChange={(e) => setMachineId(e.target.value ? Number(e.target.value) : "")}
+                      >
+                        <option value="">
+                          {loadingMachines ? "Loading machines…" : "Select a machine…"}
+                        </option>
+                        {machines.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.machine_name} ({m.machine_code})
+                          </option>
+                        ))}
+                      </select>
+
+                      {selectedMachine && (
+                        <div className="text-secondary small mt-1">
+                          {selectedMachine.manufacturer ?? "—"}
+                          {selectedMachine.model ? ` • ${selectedMachine.model}` : ""}
+                          {selectedMachine.location ? ` • ${selectedMachine.location}` : ""}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="col-md-6">
+                      <label className="form-label">Reason *</label>
+                      <input
+                        className="form-control"
+                        value={reason}
+                        onChange={(e) => setReason(e.target.value)}
+                        placeholder="e.g. Preventative service, Pump replaced, Leak investigated"
+                      />
+                    </div>
+
+                    <div className="col-md-6">
+                      <label className="form-label">Start date/time *</label>
+                      <input
+                        type="datetime-local"
+                        className="form-control"
+                        value={startedAtLocal}
+                        onChange={(e) => setStartedAtLocal(e.target.value)}
+                      />
+                    </div>
+
+                    <div className="col-md-6">
+                      <label className="form-label">End date/time</label>
+                      <input
+                        type="datetime-local"
+                        className="form-control"
+                        value={endedAtLocal}
+                        onChange={(e) => setEndedAtLocal(e.target.value)}
+                      />
+                      <div className="text-secondary small mt-1">
+                        Optional. Leave blank if the work is ongoing.
+                      </div>
+                    </div>
+
+                    <div className="col-12">
+                      <label className="form-label">Notes</label>
+                      <textarea
+                        className="form-control"
+                        rows={3}
+                        value={notes}
+                        onChange={(e) => setNotes(e.target.value)}
+                        placeholder="Any observations, parts used, test results, follow-ups…"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="modal-footer">
+                  <button
+                    className="btn btn-outline-secondary"
+                    onClick={() => {
+                      // On cancel, close and reset to avoid stale values next time
+                      setModalOpen(false);
+                      resetForm(false);
+                    }}
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    className={`btn ${isEditing ? "btn-warning" : "btn-primary"}`}
+                    onClick={submitModal}
+                  >
+                    <i className={`bi ${isEditing ? "bi-save" : "bi-plus-circle"}`} aria-hidden="true" />{" "}
+                    {isEditing ? "Save changes" : "Raise issue"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
