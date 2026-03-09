@@ -9,10 +9,10 @@ permissions:
   contents: read
 
 env:
-  RESOURCE_GROUP: <YOUR_RESOURCE_GROUP>
+  RESOURCE_GROUP: BridgePoint
   CONTAINERAPP_NAME: bridgepoint
   ACR_NAME: GM61Bridgepoint
-  ACR_LOGIN_SERVER: GM61Bridgepoint.azurecr.io
+  ACR_LOGIN_SERVER: gm61bridgepoint.azurecr.io
 
 jobs:
   build_and_deploy:
