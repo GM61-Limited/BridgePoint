@@ -1,4 +1,4 @@
-name: Build & Deploy BridgePoint (ACA multi-container)
+name: Build & Push BridgePoint Images (versioned)
 
 on:
   push:
@@ -9,18 +9,23 @@ permissions:
   contents: read
 
 env:
-  RESOURCE_GROUP: BridgePoint
-  CONTAINERAPP_NAME: bridgepoint
   ACR_NAME: GM61Bridgepoint
   ACR_LOGIN_SERVER: gm61bridgepoint.azurecr.io
 
 jobs:
-  build_and_deploy:
+  build_images:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Read VERSION
+        id: version
+        run: |
+          VERSION=$(cat VERSION)
+          echo "VERSION=v$VERSION"
+          echo "VERSION=v$VERSION" >> $GITHUB_ENV
 
       - name: Azure Login (OIDC)
         uses: azure/login@v2
@@ -29,49 +34,22 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # ✅ NEW: This proves what subscription the runner is actually using
-      # and whether it can see your container app in the RG.
-      - name: Debug Azure context (subscription + container apps)
-        run: |
-          set -e
-          echo "RESOURCE_GROUP=${RESOURCE_GROUP}"
-          echo "CONTAINERAPP_NAME=${CONTAINERAPP_NAME}"
-          echo "ACR_NAME=${ACR_NAME}"
-          echo "ACR_LOGIN_SERVER=${ACR_LOGIN_SERVER}"
-          echo "----- az account show -----"
-          az account show -o table
-          echo "----- container apps in resource group -----"
-          az containerapp list -g "${RESOURCE_GROUP}" -o table
-
       - name: Login to ACR
         run: |
-          set -e
           az acr login --name "${ACR_NAME}"
 
-      - name: Build & Push Backend (ACR build)
+      - name: Build & Push Backend (v${{ env.VERSION }})
         run: |
-          set -e
           az acr build \
             --registry "${ACR_NAME}" \
-            --image "bridgepoint-backend:${{ github.sha }}" \
+            --image "bridgepoint-backend:${VERSION}" \
             --file backend/Dockerfile \
             backend
 
-      - name: Build & Push Frontend (ACR build)
+      - name: Build & Push Frontend (v${{ env.VERSION }})
         run: |
-          set -e
           az acr build \
             --registry "${ACR_NAME}" \
-            --image "bridgepoint-frontend:${{ github.sha }}" \
+            --image "bridgepoint-frontend:${VERSION}" \
             --file webapp/Dockerfile \
             webapp
-
-      - name: Update Container App images
-        run: |
-          set -e
-          echo "Updating ACA '${CONTAINERAPP_NAME}' in RG '${RESOURCE_GROUP}' to sha '${{ github.sha }}'..."
-          az containerapp update \
-            --resource-group "${RESOURCE_GROUP}" \
-            --name "${CONTAINERAPP_NAME}" \
-            --set properties.template.containers[0].image="${ACR_LOGIN_SERVER}/bridgepoint-frontend:${{ github.sha }}" \
-            --set properties.template.containers[1].image="${ACR_LOGIN_SERVER}/bridgepoint-backend:${{ github.sha }}"
