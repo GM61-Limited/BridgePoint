@@ -305,6 +305,16 @@ export default function Layout() {
             <span className="sidebar-label">Settings</span>
           </NavLink>
 
+          {/* ✅ NEW: Logs (core app, not machine-specific) */}
+          <NavLink
+            to="/logs"
+            title={collapsed ? "Logs" : undefined}
+            className={({ isActive }) => navClass(isActive)}
+          >
+            <i className={iconCls("bi-journal-text")} aria-hidden="true" />
+            <span className="sidebar-label">Logs</span>
+          </NavLink>
+
           {modulesError && (
             <div className="px-3 pt-2 text-warning small">
               <i className="bi bi-exclamation-triangle me-1" aria-hidden="true" />

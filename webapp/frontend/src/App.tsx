@@ -30,6 +30,9 @@ import Health from "./pages/Health";
 // ✅ NEW: Maintenance placeholder page
 import Maintenance from "./pages/Maintenance";
 
+// ✅ NEW: Logs / Audit page (core app, not machine-specific)
+import LogsPage from "./pages/LogsPage";
+
 // Connectors
 import Connectors from "./pages/connectors";
 
@@ -126,6 +129,9 @@ export default function App() {
 
             {/* Always available */}
             <Route path="settings" element={<Settings />} />
+
+            {/* ✅ NEW: Core app Logs (not machine-specific) */}
+            <Route path="logs" element={<LogsPage />} />
 
             {/* Machine Monitoring */}
             <Route
