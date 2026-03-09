@@ -194,7 +194,6 @@ export async function putEnvironmentModules(
 }
 
 // ---------- Machines / Lookups ----------
-// In src/lib/api.ts, inside export type Machine = { ... }
 export type Machine = {
   id: number;
   environment_id: number;
@@ -373,14 +372,12 @@ export async function listWasherXmlUploads(params?: {
 }
 
 // ---------- Washer Cycles ----------
-// ---------- Washer Cycles ----------
 export type WasherCycleStage = {
   started_at?: string;
   ended_at?: string;
   temperature_c?: number;
 };
 
-// src/lib/api.ts (update WasherCycle type)
 export type WasherCycle = {
   id: number;
   cycle_number: number | null;
@@ -505,5 +502,65 @@ export async function updateMaintenanceLog(
   }
 ): Promise<MaintenanceLog> {
   const { data } = await api.put(`/v1/maintenance/${id}`, payload);
+  return data;
+}
+
+// ---------- Audit Logs ----------
+export type AuditLog = {
+  id: string | number;
+
+  // who
+  user_id?: string | number | null;
+  user_email?: string | null;
+  user_name?: string | null;
+
+  // what
+  action: string;
+  entity_type?: string | null;
+  entity_id?: string | number | null;
+
+  // where/how
+  ip_address?: string | null;
+  user_agent?: string | null;
+
+  // when
+  created_at: string; // ISO datetime string
+
+  // optional details blob
+  details?: any;
+};
+
+export type AuditLogsPage = {
+  items: AuditLog[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+export async function listAuditLogs(params?: {
+  q?: string;
+  user?: string;
+  action?: string;
+  entity_type?: string;
+  entity_id?: string | number;
+  from?: string; // yyyy-mm-dd
+  to?: string;   // yyyy-mm-dd
+  page?: number;
+  limit?: number;
+}) {
+  const { data } = await api.get<AuditLogsPage>("/v1/audit-logs", {
+    params: {
+      q: params?.q,
+      user: params?.user,
+      action: params?.action,
+      entity_type: params?.entity_type,
+      entity_id: params?.entity_id,
+      from: params?.from,
+      to: params?.to,
+      page: params?.page ?? 1,
+      limit: params?.limit ?? 25,
+    },
+  });
+
   return data;
 }

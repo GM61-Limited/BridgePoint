@@ -148,6 +148,15 @@ app.include_router(washer_cycles_router)
 # ✅ Register Maintenance API
 app.include_router(maintenance_router)
 
+# ✅ Register Audit Logs API (safe optional import so backend never fails to boot)
+try:
+    from app.api.v1.audit_logs_routes import router as audit_logs_router
+    app.include_router(audit_logs_router)
+    log.info("Audit Logs API enabled: /api/v1/audit-logs")
+except Exception as e:
+    # IMPORTANT: don't crash the entire backend if audit logs file isn't present in the image yet
+    log.warning("Audit Logs API NOT enabled (audit_logs_routes missing or failed to import): %s", e)
+
 # ✅ Register Uploads API (safe optional import so backend never fails to boot)
 try:
     from app.api.v1.uploads_routes import router as uploads_router

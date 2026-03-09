@@ -1,104 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-
-/**
- * ==================================
- * CONFIG — EDIT THESE FEW LINES ONLY
- * ==================================
- */
-
-// If you're using nginx proxy to backend at /api, keep API_BASE = "".
-// If no proxy (local dev), set API_BASE = "http://localhost:8000" (or your backend URL).
-const API_BASE = "";
-
-// Auth mode:
-// - true  => sends Authorization: Bearer <token from localStorage>
-// - false => uses cookie sessions (credentials: "include")
-const USE_BEARER_AUTH = true;
-const TOKEN_STORAGE_KEY = "access_token"; // change if your key differs
-
-// Endpoint for logs:
-// Expected: GET /api/v1/audit-logs?query params...
-const LOGS_ENDPOINT = `${API_BASE}/api/v1/audit-logs`;
-
-/**
- * ==================================
- * TYPES — adjust to match your backend
- * ==================================
- */
-type AuditLog = {
-  id: string | number;
-
-  // who
-  user_id?: string | number | null;
-  user_email?: string | null;
-  user_name?: string | null;
-
-  // what
-  action: string; // e.g. "LOGIN", "UPLOAD_XML", "DELETE_MACHINE"
-  entity_type?: string | null; // e.g. "machine", "cycle", "file"
-  entity_id?: string | number | null;
-
-  // where/how
-  ip_address?: string | null;
-  user_agent?: string | null;
-
-  // when
-  created_at: string; // ISO date-time string
-
-  // optional details blob
-  details?: any; // JSON object
-};
-
-// Many APIs return { items, total, page, page_size } or similar.
-// This supports that, but also works if your API returns an array directly.
-type LogsResponse =
-  | AuditLog[]
-  | {
-      items: AuditLog[];
-      total: number;
-      page: number;
-      page_size: number;
-    };
-
-/**
- * ==================================
- * HTTP helper
- * ==================================
- */
-async function apiFetch<T>(url: string, init: RequestInit = {}): Promise<T> {
-  const headers: Record<string, string> = {
-    ...(init.headers as Record<string, string> | undefined),
-  };
-
-  // For GET requests, don't force content-type
-  if (init.method && init.method.toUpperCase() !== "GET") {
-    headers["Content-Type"] = headers["Content-Type"] ?? "application/json";
-  }
-
-  if (USE_BEARER_AUTH) {
-    const token = localStorage.getItem(TOKEN_STORAGE_KEY);
-    if (token) headers.Authorization = `Bearer ${token}`;
-  }
-
-  const res = await fetch(url, {
-    ...init,
-    headers,
-    credentials: USE_BEARER_AUTH ? "omit" : "include",
-  });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    const msg = text?.trim()
-      ? `${res.status} ${res.statusText}: ${text}`
-      : `${res.status} ${res.statusText}`;
-    throw new Error(msg);
-  }
-
-  // handle 204 no content
-  if (res.status === 204) return undefined as unknown as T;
-
-  return (await res.json()) as T;
-}
+import { getApiErrorMessage, listAuditLogs, type AuditLog } from "../lib/api";
 
 /**
  * ==================================
@@ -166,7 +67,9 @@ export default function LogsPage() {
     d.setDate(d.getDate() - 7);
     return toDateInputValue(d.toISOString());
   });
-  const [toDate, setToDate] = useState(() => toDateInputValue(new Date().toISOString()));
+  const [toDate, setToDate] = useState(() =>
+    toDateInputValue(new Date().toISOString())
+  );
 
   // Pagination
   const [page, setPage] = useState(1);
@@ -188,7 +91,12 @@ export default function LogsPage() {
     return Math.max(1, Math.ceil(total / pageSize));
   }, [total, pageSize]);
 
+  /**
+   * For display/debug only (not used for HTTP anymore).
+   * Your actual requests go via axios baseURL "/api" (or VITE_API_BASE_URL).
+   */
   const endpointUrl = useMemo(() => {
+    const LOGS_ENDPOINT = "/api/v1/audit-logs";
     return (
       LOGS_ENDPOINT +
       buildQuery({
@@ -210,23 +118,28 @@ export default function LogsPage() {
     setError(null);
 
     try {
-      const data = await apiFetch<LogsResponse>(endpointUrl, { method: "GET" });
+      const data = await listAuditLogs({
+        q,
+        user,
+        action,
+        entity_type: entityType,
+        entity_id: entityId,
+        from: fromDate,
+        to: toDate,
+        page,
+        limit: pageSize,
+      });
 
-      if (Array.isArray(data)) {
-        setItems(data);
-        setTotal(null);
-      } else {
-        setItems(data.items ?? []);
-        setTotal(typeof data.total === "number" ? data.total : null);
-      }
+      setItems(data.items ?? []);
+      setTotal(typeof data.total === "number" ? data.total : null);
     } catch (e: any) {
-      setError(e?.message ?? "Failed to load logs.");
+      setError(getApiErrorMessage(e) || e?.message || "Failed to load logs.");
       setItems([]);
       setTotal(null);
     } finally {
       setLoading(false);
     }
-  }, [endpointUrl]);
+  }, [q, user, action, entityType, entityId, fromDate, toDate, page, pageSize]);
 
   useEffect(() => {
     void load();
@@ -268,7 +181,8 @@ export default function LogsPage() {
         <div>
           <h2 style={styles.h2}>Audit Logs</h2>
           <div style={styles.muted}>
-            Track who did what, when, and from where. Use filters to narrow down results.
+            Track who did what, when, and from where. Use filters to narrow down
+            results.
           </div>
         </div>
         <div style={styles.headerActions}>
@@ -292,22 +206,8 @@ export default function LogsPage() {
           </div>
 
           <div style={{ marginTop: 10, ...styles.muted }}>
-            If this is a <code>401</code>:
-            {USE_BEARER_AUTH ? (
-              <ul style={{ marginTop: 6 }}>
-                <li>
-                  Confirm the token exists in <code>localStorage["{TOKEN_STORAGE_KEY}"]</code>.
-                </li>
-                <li>
-                  Confirm backend expects <code>Authorization: Bearer &lt;token&gt;</code>.
-                </li>
-              </ul>
-            ) : (
-              <ul style={{ marginTop: 6 }}>
-                <li>Confirm you are logged in and cookies are set.</li>
-                <li>Confirm backend allows CORS with credentials.</li>
-              </ul>
-            )}
+            If this is a <code>401</code>: confirm you are logged in and a token is being
+            set via <code>setToken()</code> after login (your Axios interceptor will attach it).
           </div>
         </div>
       )}
@@ -444,7 +344,9 @@ export default function LogsPage() {
                 ) : null}
               </>
             ) : (
-              <>Showing <strong>{items.length}</strong> records</>
+              <>
+                Showing <strong>{items.length}</strong> records
+              </>
             )}
           </div>
         </div>
@@ -471,14 +373,19 @@ export default function LogsPage() {
                   const userLabel =
                     it.user_email ||
                     it.user_name ||
-                    (it.user_id !== undefined && it.user_id !== null ? `User#${it.user_id}` : "Unknown");
+                    (it.user_id !== undefined && it.user_id !== null
+                      ? `User#${it.user_id}`
+                      : "Unknown");
 
-                  const entityLabel =
-                    it.entity_type
-                      ? `${it.entity_type}${it.entity_id !== undefined && it.entity_id !== null ? `#${it.entity_id}` : ""}`
-                      : it.entity_id !== undefined && it.entity_id !== null
-                      ? `#${it.entity_id}`
-                      : "—";
+                  const entityLabel = it.entity_type
+                    ? `${it.entity_type}${
+                        it.entity_id !== undefined && it.entity_id !== null
+                          ? `#${it.entity_id}`
+                          : ""
+                      }`
+                    : it.entity_id !== undefined && it.entity_id !== null
+                    ? `#${it.entity_id}`
+                    : "—";
 
                   const isExpanded = expandedId === it.id;
 
@@ -489,7 +396,7 @@ export default function LogsPage() {
                         <td style={styles.td}>
                           <div style={{ fontWeight: 700 }}>{userLabel}</div>
                           {it.user_agent ? (
-                            <div style={styles.mutedSmall} title={it.user_agent}>
+                            <div style={styles.mutedSmall} title={it.user_agent ?? undefined}>
                               {truncate(it.user_agent, 60)}
                             </div>
                           ) : null}
@@ -538,7 +445,11 @@ export default function LogsPage() {
         )}
 
         <div style={styles.paginationRow}>
-          <button onClick={prevPage} style={styles.buttonSecondary} disabled={loading || page <= 1}>
+          <button
+            onClick={prevPage}
+            style={styles.buttonSecondary}
+            disabled={loading || page <= 1}
+          >
             ← Prev
           </button>
 
