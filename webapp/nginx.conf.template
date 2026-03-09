@@ -1,10 +1,6 @@
 # default.conf.template
 # Processed by envsubst at container startup in the official nginx image.
 
-# Provide defaults so nginx doesn't fail hard if env vars are missing.
-# envsubst doesn't support Bash-style defaults, so we do it by ensuring env vars are set in Container Apps / Compose.
-# (Keep this comment as a reminder.)
-
 upstream backend_upstream {
     server ${BACKEND_HOST}:${BACKEND_PORT};
     keepalive 32;
@@ -29,23 +25,58 @@ server {
   location /assets/ { try_files $uri =404; }
   location /images/ { try_files $uri =404; }
 
+  # ------------------------------------------------------------
+  # Swagger/OpenAPI: make swagger work behind /api without backend changes
+  # ------------------------------------------------------------
+
+  # Swagger UI (served by FastAPI) commonly points to /openapi.json (absolute path).
+  # Your SPA fallback would serve index.html for /openapi.json -> Swagger breaks.
+  # Fix: proxy /openapi.json directly to the backend's /openapi.json.
+  location = /openapi.json {
+    proxy_pass ${BACKEND_SCHEME}://backend_upstream/openapi.json;
+    proxy_http_version 1.1;
+
+    proxy_set_header Host              $host;
+    proxy_set_header X-Forwarded-Host  $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    # Helps apps behind a prefix (doesn't harm if ignored)
+    proxy_set_header X-Forwarded-Prefix /api;
+
+    proxy_ssl_server_name on;
+
+    proxy_connect_timeout 5s;
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+  }
+
+  # Optional convenience: allow /docs too (redirects to proxied docs)
+  location = /docs {
+    return 302 /api/docs;
+  }
+  location = /docs/ {
+    return 302 /api/docs;
+  }
+
+  # ------------------------------------------------------------
   # Explicit auth mapping
+  # ------------------------------------------------------------
   location = /api/login {
     client_max_body_size 100m;
 
     proxy_pass ${BACKEND_SCHEME}://backend_upstream${BACKEND_LOGIN_PATH};
     proxy_http_version 1.1;
 
-    # Prefer passing through the original host unless you have a reason to override:
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Forwarded-Host  $host;
 
-    proxy_set_header X-Real-IP          $remote_addr;
-    proxy_set_header X-Forwarded-For    $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto  $scheme;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header X-Forwarded-Prefix /api;
 
-    # Only relevant if BACKEND_SCHEME=https (won't hurt on http):
     proxy_ssl_server_name on;
 
     proxy_connect_timeout 5s;
@@ -53,19 +84,21 @@ server {
     proxy_send_timeout 300s;
   }
 
+  # ------------------------------------------------------------
   # Generic API gateway: /api/* -> /*  (strips /api/ prefix)
+  # ------------------------------------------------------------
   location /api/ {
     client_max_body_size 100m;
 
     proxy_pass ${BACKEND_SCHEME}://backend_upstream/;
     proxy_http_version 1.1;
 
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Forwarded-Host  $host;
 
-    proxy_set_header X-Real-IP          $remote_addr;
-    proxy_set_header X-Forwarded-For    $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto  $scheme;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header X-Forwarded-Prefix /api;
 
     proxy_ssl_server_name on;
@@ -75,21 +108,27 @@ server {
     proxy_send_timeout 300s;
   }
 
+  # ------------------------------------------------------------
+  # Auth passthrough (if used)
+  # ------------------------------------------------------------
   location /auth/ {
     proxy_pass ${BACKEND_SCHEME}://backend_upstream/auth/;
     proxy_http_version 1.1;
 
     proxy_ssl_server_name on;
 
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Forwarded-Host  $host;
 
-    proxy_set_header X-Real-IP          $remote_addr;
-    proxy_set_header X-Forwarded-For    $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto  $scheme;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header X-Forwarded-Prefix /auth;
   }
 
+  # ------------------------------------------------------------
+  # SPA fallback
+  # ------------------------------------------------------------
   location / {
     try_files $uri /index.html;
   }

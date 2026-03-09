@@ -4,7 +4,6 @@ import { Link, useNavigate } from "react-router-dom";
 
 import {
   createMachine,
-  deactivateMachine,
   getIntegrationProfiles,
   getMachineTypes,
   type IntegrationProfile,
@@ -15,8 +14,6 @@ import {
   updateMachine,
   type WasherCycle,
 } from "../lib/api";
-
-type Chip = "All" | "Enabled" | "Disabled";
 
 /**
  * Connectivity badge
@@ -65,12 +62,75 @@ function safeStr(v: unknown) {
 }
 
 /**
+ * Cycle result helpers
+ * --------------------
+ * We don't know the exact field name in WasherCycle for "result".
+ * This function tries common candidates safely.
+ */
+function extractCycleResult(c: WasherCycle): string {
+  const anyC = c as any;
+
+  // 1) Most likely in your API: result is boolean|null (from washer_cycles.result)
+  if (typeof anyC.result === "boolean") return anyC.result ? "PASS" : "FAIL";
+  if (anyC.result === null || anyC.result === undefined) return "UNKNOWN";
+
+  // 2) Sometimes it may already be a string in other environments
+  if (typeof anyC.result === "string" && anyC.result.trim()) return anyC.result.trim();
+
+  // 3) Other candidate fields (future-proofing)
+  const strCandidate =
+    anyC.cycle_result ??
+    anyC.cycleResult ??
+    anyC.status ??
+    anyC.outcome ??
+    anyC.state ??
+    null;
+
+  if (typeof strCandidate === "string" && strCandidate.trim()) return strCandidate.trim();
+
+  // 4) Alternate boolean field
+  if (typeof anyC.passed === "boolean") return anyC.passed ? "PASS" : "FAIL";
+
+  return "UNKNOWN";
+}
+
+function resultBadgeClass(resultRaw: string): string {
+  const r = (resultRaw || "").toLowerCase();
+
+  // Green-ish outcomes
+  if (
+    r === "pass" ||
+    r === "passed" ||
+    r === "ok" ||
+    r === "success" ||
+    r === "successful" ||
+    r === "complete" ||
+    r === "completed"
+  ) {
+    return "text-bg-success";
+  }
+
+  // Red-ish outcomes
+  if (r === "fail" || r === "failed" || r === "error" || r === "aborted" || r === "rejected") {
+    return "text-bg-danger";
+  }
+
+  // Unknown / not supplied
+  if (r === "--" || r === "unknown" || r === "n/a") return "text-bg-secondary";
+
+  // Neutral default
+  return "text-bg-primary";
+}
+
+/**
  * Build a map: machine_id -> latest cycle summary
  * We treat "latest" as the first occurrence per machine in the
  * already-sorted-by-started_at-desc washer-cycles response.
  */
-function buildLastCycleMap(cycles: WasherCycle[]): Map<number, { cycleNo: string; program: string }> {
-  const m = new Map<number, { cycleNo: string; program: string }>();
+function buildLastCycleMap(
+  cycles: WasherCycle[]
+): Map<number, { cycleNo: string; program: string; result: string }> {
+  const m = new Map<number, { cycleNo: string; program: string; result: string }>();
 
   for (const c of cycles) {
     // only set once (first == newest)
@@ -84,7 +144,9 @@ function buildLastCycleMap(cycles: WasherCycle[]): Map<number, { cycleNo: string
         ? "--"
         : String(c.program_name);
 
-    m.set(c.machine_id, { cycleNo, program });
+    const result = extractCycleResult(c);
+
+    m.set(c.machine_id, { cycleNo, program, result });
   }
 
   return m;
@@ -147,15 +209,14 @@ export default function WashersOverview() {
   const [integrationProfiles, setIntegrationProfiles] = useState<IntegrationProfile[]>([]);
 
   // ✅ Last-cycle map from washer cycles
-  const [lastByMachineId, setLastByMachineId] = useState<Map<number, { cycleNo: string; program: string }>>(
-    () => new Map()
-  );
+  const [lastByMachineId, setLastByMachineId] = useState<
+    Map<number, { cycleNo: string; program: string; result: string }>
+  >(() => new Map());
 
-  // Filters
+  // Filters (removed Enabled/Disabled chip filter)
   const [query, setQuery] = useState<string>("");
   const [typeKey, setTypeKey] = useState<string>(""); // all types
   const [manufacturer, setManufacturer] = useState<string>("");
-  const [chip, setChip] = useState<Chip>("All");
 
   // Modal state
   const [showModal, setShowModal] = useState(false);
@@ -210,20 +271,15 @@ export default function WashersOverview() {
   }
 
   const manufacturers = useMemo(() => {
-    return Array.from(new Set((machines.map((m) => m.manufacturer).filter(Boolean) as string[]))).sort();
+    return Array.from(
+      new Set((machines.map((m) => m.manufacturer).filter(Boolean) as string[]))
+    ).sort();
   }, [machines]);
-
-  // KPIs
-  const total = machines.length;
-  const enabledCount = machines.filter((m) => m.is_active).length;
-  const disabledCount = total - enabledCount;
 
   const filtered = useMemo(() => {
     return machines.filter((m) => {
       const matchType = !typeKey || m.machine_type === typeKey;
       const matchMfr = !manufacturer || (m.manufacturer || "") === manufacturer;
-
-      const matchChip = chip === "All" ? true : chip === "Enabled" ? m.is_active : !m.is_active;
 
       const hay = [
         m.machine_name,
@@ -241,9 +297,9 @@ export default function WashersOverview() {
 
       const matchText = hay.includes(query.toLowerCase());
 
-      return matchType && matchMfr && matchChip && matchText;
+      return matchType && matchMfr && matchText;
     });
-  }, [machines, typeKey, manufacturer, chip, query]);
+  }, [machines, typeKey, manufacturer, query]);
 
   function openCreate() {
     setEditingId(null);
@@ -326,31 +382,18 @@ export default function WashersOverview() {
     }
   }
 
-  async function onDisable(id: number) {
-    setErr("");
-    try {
-      await deactivateMachine(id);
-      await refreshMachinesAndLast();
-    } catch (e: any) {
-      setErr(e?.message || "Failed to disable machine");
-    }
-  }
-
   return (
     <div className="container py-4">
       {/* Header */}
       <div className="d-flex justify-content-between mb-3">
         <div>
           <h1 className="h4 mb-0">Machines Overview</h1>
-          <div className="text-secondary small">
-            Machines are file-driven (cycle files received at end of cycle). Real-time connectivity status is not applicable yet.
-          </div>
+          {/* ✅ Removed subtext under title for production */}
         </div>
         <div className="d-flex gap-2">
           <button className="btn btn-primary btn-sm" onClick={openCreate}>
             + Add machine
           </button>
-          {/* ✅ Removed top shortcut to Cycles (already in nav + per machine) */}
         </div>
       </div>
 
@@ -360,33 +403,7 @@ export default function WashersOverview() {
         </div>
       )}
 
-      {/* KPIs */}
-      <div className="row g-3 mb-3">
-        <div className="col-12 col-sm-6 col-lg-4 d-flex">
-          <div className="card border-secondary flex-fill">
-            <div className="card-body">
-              <div>Total machines</div>
-              <div className="h4 mb-0">{total}</div>
-            </div>
-          </div>
-        </div>
-        <div className="col-12 col-sm-6 col-lg-4 d-flex">
-          <div className="card border-secondary flex-fill">
-            <div className="card-body">
-              <div>Enabled</div>
-              <div className="h4 mb-0">{enabledCount}</div>
-            </div>
-          </div>
-        </div>
-        <div className="col-12 col-sm-6 col-lg-4 d-flex">
-          <div className="card border-secondary flex-fill">
-            <div className="card-body">
-              <div>Disabled</div>
-              <div className="h4 mb-0">{disabledCount}</div>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* ✅ Removed KPI cards */}
 
       {/* Filters */}
       <div className="row g-2 align-items-center mb-3">
@@ -432,28 +449,7 @@ export default function WashersOverview() {
           />
         </div>
 
-        <div className="col-12 col-lg-3">
-          <div className="btn-group btn-group-sm w-100" role="group" aria-label="Enabled filter">
-            <button
-              className={`btn ${chip === "Enabled" ? "btn-outline-success" : "btn-outline-secondary"}`}
-              onClick={() => setChip("Enabled")}
-            >
-              Enabled
-            </button>
-            <button
-              className="btn btn-outline-secondary"
-              onClick={() => setChip("Disabled")}
-            >
-              Disabled
-            </button>
-            <button
-              className={`btn ${chip === "All" ? "btn-outline-dark" : "btn-outline-secondary"}`}
-              onClick={() => setChip("All")}
-            >
-              All
-            </button>
-          </div>
-        </div>
+        {/* ✅ Removed Enabled/Disabled chip filter */}
       </div>
 
       {/* Grid */}
@@ -473,9 +469,12 @@ export default function WashersOverview() {
           filtered.map((m) => {
             const host =
               m.hostname || (m.ip_address ? `${m.ip_address}${m.port ? `:${m.port}` : ""}` : "—");
-            const sub = `${m.manufacturer ? m.manufacturer : "Unknown manufacturer"}${m.model ? ` • ${m.model}` : ""}`;
 
-            const last = lastByMachineId.get(m.id) ?? { cycleNo: "--", program: "--" };
+            const sub = `${m.manufacturer ? m.manufacturer : "Unknown manufacturer"}${
+              m.model ? ` • ${m.model}` : ""
+            }`;
+
+            const last = lastByMachineId.get(m.id) ?? { cycleNo: "--", program: "--", result: "--" };
 
             return (
               <div key={m.id} className="col-12 col-sm-6 col-xl-4 d-flex">
@@ -496,7 +495,7 @@ export default function WashersOverview() {
                       </div>
                     </div>
 
-                    {/* ✅ Last cycle & program (derived from washer cycles) */}
+                    {/* ✅ Last cycle / program / result */}
                     <div className="mt-3 small">
                       <div className="d-flex justify-content-between">
                         <span className="text-secondary">Last cycle</span>
@@ -505,6 +504,12 @@ export default function WashersOverview() {
                       <div className="d-flex justify-content-between">
                         <span className="text-secondary">Last program</span>
                         <span className="text-body">{last.program}</span>
+                      </div>
+                      <div className="d-flex justify-content-between align-items-center">
+                        <span className="text-secondary">Last result</span>
+                        <span className={`badge ${resultBadgeClass(last.result)}`}>
+                          {last.result || "--"}
+                        </span>
                       </div>
                     </div>
 
@@ -537,15 +542,8 @@ export default function WashersOverview() {
                         >
                           Edit
                         </button>
-                        <button
-                          type="button"
-                          className="btn btn-outline-danger"
-                          disabled={!m.is_active}
-                          onClick={() => onDisable(m.id)}
-                          title="Disables this machine (sets enabled=false)"
-                        >
-                          Disable
-                        </button>
+
+                        {/* ✅ Removed Disable button */}
                       </div>
 
                       <div className="d-flex gap-2">

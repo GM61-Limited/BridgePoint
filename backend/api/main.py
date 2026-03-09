@@ -1,6 +1,7 @@
 # app/main.py
 import os
 import logging
+from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,9 +32,35 @@ from app.api.v1.washer_cycles_routes import router as washer_cycles_router
 log = logging.getLogger("bridgepoint")
 
 
+def _iso_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _get_env_first(*keys: str, default: str | None = None) -> str | None:
+    """
+    Return the first non-empty env var found from keys.
+    """
+    for k in keys:
+        v = os.getenv(k)
+        if v is not None and str(v).strip() != "":
+            return str(v).strip()
+    return default
+
+
+# App metadata (used in FastAPI docs and /version endpoint)
+APP_VERSION = _get_env_first("APP_VERSION", "VERSION", default="unknown")
+GIT_SHA = _get_env_first("GIT_SHA", "COMMIT_SHA", default=None)
+BUILD_TIME = _get_env_first("BUILD_TIME", "BUILT_AT", default=None)
+
+# Azure Container Apps runtime metadata (these are injected by the platform)
+CONTAINER_APP_NAME = _get_env_first("CONTAINER_APP_NAME", default=None)
+CONTAINER_APP_REVISION = _get_env_first("CONTAINER_APP_REVISION", default=None)
+
+
 app = FastAPI(
     title=settings.APP_NAME,
-    version=os.getenv("APP_VERSION", "unknown"),
+    version=APP_VERSION,
+    root_path=settings.ROOT_PATH,
 )
 
 # -------------------------
@@ -49,6 +76,20 @@ app.add_middleware(
 )
 
 # -------------------------
+# Startup log (helps a TON in cloud diagnostics)
+# -------------------------
+@app.on_event("startup")
+def _startup_log():
+    log.info(
+        "BridgePoint starting | version=%s commit=%s buildTime=%s containerApp=%s revision=%s",
+        APP_VERSION,
+        (GIT_SHA[:12] if GIT_SHA else None),
+        BUILD_TIME,
+        CONTAINER_APP_NAME,
+        CONTAINER_APP_REVISION,
+    )
+
+# -------------------------
 # Health / hello
 # -------------------------
 @app.get("/health")
@@ -62,14 +103,23 @@ def hello_world():
 
 
 # -------------------------
-# Optional: App version metadata for Settings "About BridgePoint"
+# App version metadata for Settings "About BridgePoint"
 # -------------------------
 @app.get("/version")
 def version():
+    """
+    Simple metadata endpoint consumed by the Settings UI.
+    Keep keys stable: version, commit, buildTime.
+    """
     return {
-        "version": os.getenv("APP_VERSION", "unknown"),
-        "commit": os.getenv("GIT_SHA"),
-        "buildTime": os.getenv("BUILD_TIME"),
+        "version": APP_VERSION,
+        "commit": GIT_SHA,
+        "buildTime": BUILD_TIME,
+        # Extra diagnostics (safe additions; frontend ignores unknown keys)
+        "appName": settings.APP_NAME,
+        "containerApp": CONTAINER_APP_NAME,
+        "revision": CONTAINER_APP_REVISION,
+        "reportedAt": _iso_now(),
     }
 
 
@@ -94,7 +144,6 @@ app.include_router(washer_cycles_router)
 
 # ✅ Register Uploads API (safe optional import so backend never fails to boot)
 try:
-    # ✅ Register Uploads API (fail fast in dev so we don't silently ship 404s)
     from app.api.v1.uploads_routes import router as uploads_router
     app.include_router(uploads_router)
     log.info("Uploads API enabled: /v1/uploads/*")

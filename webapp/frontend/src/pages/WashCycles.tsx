@@ -63,6 +63,13 @@ export default function WashCycles() {
   const [fromDate, setFromDate] = useState<string>("");
   const [toDate, setToDate] = useState<string>("");
 
+  // ✅ New: cycle number search (string so we can allow partial)
+  const [cycleSearch, setCycleSearch] = useState<string>("");
+
+  // ✅ New: pagination state
+  const [pageSize, setPageSize] = useState<number>(50); // default
+  const [pageIndex, setPageIndex] = useState<number>(0); // 0-based
+
   const [machineLocked, setMachineLocked] = useState(false);
   const [lockedMachineLabel, setLockedMachineLabel] = useState<string>("");
 
@@ -152,6 +159,8 @@ export default function WashCycles() {
   }, [machineIdParam, machineNameParam, machineOptions.length]);
 
   const filtered = useMemo(() => {
+    const q = cycleSearch.trim();
+
     return rows.filter((r) => {
       if (filterMachineId !== "ALL" && r.machineId !== filterMachineId) return false;
       if (filterProgram !== "ALL" && r.program !== filterProgram) return false;
@@ -166,9 +175,31 @@ export default function WashCycles() {
         if (new Date(r.start) > to) return false;
       }
 
+      // ✅ Cycle number search (partial match)
+      if (q) {
+        const cycleNoStr = r.cycleNo === null || r.cycleNo === undefined ? "" : String(r.cycleNo);
+        if (!cycleNoStr.includes(q)) return false;
+      }
+
       return true;
     });
-  }, [rows, filterMachineId, filterProgram, fromDate, toDate]);
+  }, [rows, filterMachineId, filterProgram, fromDate, toDate, cycleSearch]);
+
+  // ✅ Reset to page 1 when filters/search/page size change (avoids empty pages)
+  useEffect(() => {
+    setPageIndex(0);
+  }, [filterMachineId, filterProgram, fromDate, toDate, cycleSearch, pageSize]);
+
+  // ✅ Pagination derived values
+  const totalFiltered = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize));
+  const safePageIndex = Math.min(pageIndex, totalPages - 1);
+
+  const paged = useMemo(() => {
+    const start = safePageIndex * pageSize;
+    const end = start + pageSize;
+    return filtered.slice(start, end);
+  }, [filtered, safePageIndex, pageSize]);
 
   function setMachineFilter(next: number | "ALL") {
     // If locked, don't allow changing via UI
@@ -245,14 +276,18 @@ export default function WashCycles() {
   const titleSuffix =
     machineLocked && displayMachineLabel ? ` – ${displayMachineLabel.trim()}` : "";
 
+  const canPrev = safePageIndex > 0;
+  const canNext = safePageIndex < totalPages - 1;
+
   return (
     <div className="container py-4">
       {/* Header */}
       <div className="d-flex align-items-center justify-content-between mb-3">
         <div>
           <h1 className="h4 mb-0">Cycles{titleSuffix}</h1>
-          <div className="text-secondary small">Parsed cycles appear immediately.</div>
-          {statusMsg && <div className="text-secondary small mt-1">{statusMsg}</div>}
+          <div className="text-secondary small">
+            {statusMsg || " "}
+          </div>
         </div>
 
         <Link
@@ -331,6 +366,37 @@ export default function WashCycles() {
           />
         </div>
 
+        {/* ✅ New: cycle number search */}
+        <div>
+          <label className="form-label small">Cycle #</label>
+          <input
+            inputMode="numeric"
+            pattern="[0-9]*"
+            className="form-control form-control-sm"
+            style={{ width: 140 }}
+            placeholder="e.g. 123"
+            value={cycleSearch}
+            onChange={(e) => setCycleSearch(e.target.value)}
+            aria-label="Search by cycle number"
+          />
+        </div>
+
+        {/* ✅ New: page size selector */}
+        <div>
+          <label className="form-label small">Rows</label>
+          <select
+            className="form-select form-select-sm"
+            style={{ width: 120 }}
+            value={String(pageSize)}
+            onChange={(e) => setPageSize(Number(e.target.value))}
+            aria-label="Rows per page"
+          >
+            <option value="10">10</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+        </div>
+
         {machineLocked && (
           <div className="ms-auto">
             <Link to="/wash-cycles" className="btn btn-outline-secondary btn-sm">
@@ -338,6 +404,44 @@ export default function WashCycles() {
             </Link>
           </div>
         )}
+      </div>
+
+      {/* Pagination bar */}
+      <div className="d-flex justify-content-between align-items-center mb-2">
+        <div className="text-secondary small">
+          Showing{" "}
+          {totalFiltered === 0
+            ? "0"
+            : `${safePageIndex * pageSize + 1}–${Math.min(
+                (safePageIndex + 1) * pageSize,
+                totalFiltered
+              )}`}{" "}
+          of {totalFiltered} filtered (total loaded: {rows.length})
+        </div>
+
+        <div className="d-flex align-items-center gap-2">
+          <button
+            className="btn btn-outline-secondary btn-sm"
+            onClick={() => setPageIndex((p) => Math.max(0, p - 1))}
+            disabled={!canPrev || loading}
+            aria-label="Previous page"
+          >
+            Prev
+          </button>
+
+          <span className="text-secondary small">
+            Page {safePageIndex + 1} / {totalPages}
+          </span>
+
+          <button
+            className="btn btn-outline-secondary btn-sm"
+            onClick={() => setPageIndex((p) => Math.min(totalPages - 1, p + 1))}
+            disabled={!canNext || loading}
+            aria-label="Next page"
+          >
+            Next
+          </button>
+        </div>
       </div>
 
       {/* Table */}
@@ -355,8 +459,9 @@ export default function WashCycles() {
                 <th className="text-end">Actions</th>
               </tr>
             </thead>
+
             <tbody>
-              {filtered.map((r) => (
+              {paged.map((r) => (
                 <tr key={r.id}>
                   <td>{r.cycleNo ? `#${r.cycleNo}` : "—"}</td>
                   <td>{r.machineName}</td>
@@ -422,4 +527,3 @@ export default function WashCycles() {
     </div>
   );
 }
-``

@@ -4,7 +4,7 @@ import json
 
 
 class Settings(BaseSettings):
-    APP_NAME: str = "FinanceModule Backend API"
+    APP_NAME: str = "BridgePoint API"
 
     # -----------------------------
     # CORS
@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     # Supports:
     #   - CSV:  "http://localhost,http://127.0.0.1"
     #   - JSON: '["http://localhost","http://127.0.0.1"]'
+    ROOT_PATH: str=""
     ALLOWED_ORIGINS: str = "http://localhost,http://127.0.0.1"
 
     @property
