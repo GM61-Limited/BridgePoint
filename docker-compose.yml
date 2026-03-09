@@ -52,18 +52,20 @@ services:
       - database
 
   database:
-    image: postgres
-    container_name: BridgePointDatabase
-    ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_DB: bridgepointdb
-      POSTGRES_USER: gm61admin
-      POSTGRES_PASSWORD: camioninsta
-    volumes:
-      - data:/var/lib/postgresql/data
-    networks:
-      - bridgepoint-network
+      image: postgres:17
+      container_name: BridgePointDatabase
+      ports:
+        - "5432:5432"
+      environment:
+        POSTGRES_DB: bridgepointdb
+        POSTGRES_USER: gm61admin
+        POSTGRES_PASSWORD: camioninsta
+      volumes:
+        - data:/var/lib/postgresql/data
+        # ✅ Mount the WHOLE init folder (contains init.sql)
+        - ./database/init:/docker-entrypoint-initdb.d:ro
+      networks:
+        - bridgepoint-network
 
 volumes:
   data: {}

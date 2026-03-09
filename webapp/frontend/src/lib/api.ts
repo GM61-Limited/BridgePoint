@@ -448,3 +448,48 @@ export async function getWasherCycleTelemetry(
   );
   return data;
 }
+
+// ---------- Maintenance ----------
+export type MaintenanceLog = {
+  id: string; // UUID
+  machine_id: number;
+  machine_name: string;
+  reason: string;
+  started_at: string; // ISO
+  ended_at?: string | null; // ISO
+  notes?: string | null;
+  created_at: string; // ISO
+  created_by?: number | null; // backend returns user id (int) or null
+};
+
+export async function listMaintenanceLogs(params?: {
+  machine_id?: number;
+  q?: string;
+  limit?: number;
+  offset?: number;
+}) {
+  const { data } = await api.get<MaintenanceLog[]>("/v1/maintenance", {
+    params: {
+      machine_id: params?.machine_id,
+      q: params?.q,
+      limit: params?.limit ?? 200,
+      offset: params?.offset ?? 0,
+    },
+  });
+  return data;
+}
+
+export async function createMaintenanceLog(payload: {
+  machine_id: number;
+  reason: string;
+  started_at: string;
+  ended_at?: string | null;
+  notes?: string | null;
+}) {
+  const { data } = await api.post<MaintenanceLog>("/v1/maintenance", payload);
+  return data;
+}
+
+export async function deleteMaintenanceLog(id: string) {
+  await api.delete<void>(`/v1/maintenance/${encodeURIComponent(id)}`);
+}

@@ -25,6 +25,9 @@ from app.api.v1.machine_routes import router as machine_router
 
 from app.api.v1.washer_cycles_routes import router as washer_cycles_router
 
+# ✅ Maintenance router
+from app.api.v1.maintenance_routes import router as maintenance_router
+
 # (Optional) if you later add the connectors module and want to expose those routes too:
 # from app.api.v1.connectors_routes import router as connectors_router
 
@@ -141,6 +144,9 @@ app.include_router(lookup_router)
 app.include_router(machine_router)
 
 app.include_router(washer_cycles_router)
+
+# ✅ Register Maintenance API
+app.include_router(maintenance_router)
 
 # ✅ Register Uploads API (safe optional import so backend never fails to boot)
 try:

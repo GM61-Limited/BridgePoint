@@ -8,7 +8,7 @@
 -- Extensions
 -- =========================================================
 CREATE EXTENSION IF NOT EXISTS citext;
--- CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS pgcrypto; -- for gen_random_uuid()
 
 -- =========================================================
 -- Environment (companies / tenants)
@@ -190,6 +190,17 @@ CREATE INDEX IF NOT EXISTS idx_machines_env_active
 CREATE INDEX IF NOT EXISTS idx_machines_integration_key
     ON machines (environment_id, integration_key);
 
+-- Allow composite FK checks (machine belongs to environment)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'machines_id_environment_uniq'
+    ) THEN
+        ALTER TABLE machines
+        ADD CONSTRAINT machines_id_environment_uniq UNIQUE (id, environment_id);
+    END IF;
+END $$;
+
 -- =========================================================
 -- Enforce controlled vocabularies (FKs) safely (idempotent)
 -- =========================================================
@@ -208,6 +219,56 @@ BEGIN
         ALTER TABLE machines
         ADD CONSTRAINT machines_integration_key_fk
         FOREIGN KEY (integration_key) REFERENCES integration_profiles(key);
+    END IF;
+END $$;
+
+-- =========================================================
+-- Maintenance Logs (audit trail)
+-- =========================================================
+CREATE TABLE IF NOT EXISTS maintenance_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- Tenant scope
+    environment_id INT NOT NULL REFERENCES environment(id) ON DELETE CASCADE,
+
+    -- Machine
+    machine_id INT NOT NULL REFERENCES machines(id) ON DELETE CASCADE,
+
+    -- Core fields
+    reason TEXT NOT NULL,
+    started_at TIMESTAMPTZ NOT NULL,
+    ended_at TIMESTAMPTZ NULL,
+    notes TEXT NULL,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by INT NULL REFERENCES users(id) ON DELETE SET NULL,
+
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT maintenance_logs_end_after_start_chk
+        CHECK (ended_at IS NULL OR ended_at >= started_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_maintenance_logs_env_started
+    ON maintenance_logs (environment_id, started_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_maintenance_logs_machine_started
+    ON maintenance_logs (machine_id, started_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_maintenance_logs_started
+    ON maintenance_logs (started_at DESC);
+
+-- Enforce that maintenance_logs.environment_id matches machines.environment_id
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'maintenance_logs_machine_env_fk'
+    ) THEN
+        ALTER TABLE maintenance_logs
+        ADD CONSTRAINT maintenance_logs_machine_env_fk
+        FOREIGN KEY (machine_id, environment_id)
+        REFERENCES machines (id, environment_id)
+        ON DELETE CASCADE;
     END IF;
 END $$;
 
@@ -233,7 +294,6 @@ CREATE INDEX IF NOT EXISTS ix_washer_xml_uploads_machine_id
 CREATE INDEX IF NOT EXISTS ix_washer_xml_uploads_uploaded_at
     ON washer_xml_uploads(uploaded_at DESC);
 
--- Washer XML Uploads – safe schema evolution
 ALTER TABLE washer_xml_uploads
     ADD COLUMN IF NOT EXISTS parsed BOOLEAN NOT NULL DEFAULT FALSE;
 
@@ -475,7 +535,6 @@ WHERE NOT EXISTS (SELECT 1 FROM machines WHERE environment_id = 2 AND machine_co
 INSERT INTO machines (environment_id, machine_name, machine_code, machine_type, manufacturer, model, ip_address, port, protocol, location, timezone)
 SELECT 2, 'Washer 7', 'SO-MMM-7', 'washer', 'MMM', 'Uniclean PLII 15-2 FD', '192.168.20.16'::inet, 80, 'http', 'IHSS Southampton', 'Europe/London'
 WHERE NOT EXISTS (SELECT 1 FROM machines WHERE environment_id = 2 AND machine_code = 'SO-MMM-7');
-
 
 -- 8) Seed sensor types
 INSERT INTO sensor_types (code, unit, description) VALUES

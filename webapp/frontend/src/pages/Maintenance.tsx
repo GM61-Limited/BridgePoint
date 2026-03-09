@@ -1,35 +1,23 @@
 // src/pages/Maintenance.tsx
 import { useEffect, useMemo, useState } from "react";
-import { listMachines, type Machine } from "../lib/api";
+import {
+  createMaintenanceLog,
+  deleteMaintenanceLog,
+  getApiErrorMessage,
+  listMachines,
+  listMaintenanceLogs,
+  type Machine,
+  type MaintenanceLog,
+} from "../lib/api";
 
 /**
- * Maintenance (MVP placeholder)
+ * Maintenance
  * - Lets engineers log maintenance against a machine
- * - Stores logs in localStorage for now (no backend dependency)
- * - Designed so it can be swapped to API later
+ * - Stored in the database via API (/api/v1/maintenance through axios baseURL "/api")
  */
 
-type MaintenanceLog = {
-  id: string;
-  machine_id: number;
-  machine_name: string;
-  reason: string;
-  started_at: string; // ISO
-  ended_at?: string | null; // ISO
-  notes?: string | null;
-  created_at: string; // ISO
-  created_by?: string | null; // future
-};
-
-const STORAGE_KEY = "bridgepoint:maintenance_logs:v1";
-
-function uuidLike() {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
 function toIsoFromDatetimeLocal(value: string): string {
-  // datetime-local -> local time; convert to ISO
-  // new Date("YYYY-MM-DDTHH:mm") is treated as local time by browser
+  // datetime-local -> local time; convert to ISO (UTC)
   const d = new Date(value);
   return d.toISOString();
 }
@@ -40,30 +28,13 @@ function formatDateTime(iso?: string | null): string {
   return d.toLocaleString();
 }
 
-function loadLogs(): MaintenanceLog[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as MaintenanceLog[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveLogs(logs: MaintenanceLog[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(logs));
-  } catch {
-    // ignore storage failures
-  }
-}
-
 export default function Maintenance() {
   const [machines, setMachines] = useState<Machine[]>([]);
   const [loadingMachines, setLoadingMachines] = useState(true);
 
-  const [logs, setLogs] = useState<MaintenanceLog[]>(() => loadLogs());
+  const [logs, setLogs] = useState<MaintenanceLog[]>([]);
+  const [loadingLogs, setLoadingLogs] = useState(true);
+
   const [status, setStatus] = useState<string>("");
 
   // Form state
@@ -77,6 +48,7 @@ export default function Maintenance() {
   const [filterMachineId, setFilterMachineId] = useState<number | "ALL">("ALL");
   const [query, setQuery] = useState<string>("");
 
+  // Load machines once
   useEffect(() => {
     let alive = true;
 
@@ -86,9 +58,9 @@ export default function Maintenance() {
         const m = await listMachines({ is_active: true });
         if (!alive) return;
         setMachines(m);
-      } catch (e: any) {
+      } catch (err) {
         if (!alive) return;
-        setStatus(e?.message || "Failed to load machines.");
+        setStatus(getApiErrorMessage(err) || "Failed to load machines.");
       } finally {
         if (alive) setLoadingMachines(false);
       }
@@ -99,10 +71,41 @@ export default function Maintenance() {
     };
   }, []);
 
-  // Persist logs whenever they change
+  // Load logs whenever filters/search change (debounced)
   useEffect(() => {
-    saveLogs(logs);
-  }, [logs]);
+    let alive = true;
+    const t = setTimeout(() => {
+      (async () => {
+        setLoadingLogs(true);
+        setStatus("");
+
+        try {
+          const machine_id = filterMachineId === "ALL" ? undefined : Number(filterMachineId);
+          const q = query.trim() ? query.trim() : undefined;
+
+          const data = await listMaintenanceLogs({
+            machine_id,
+            q,
+            limit: 200,
+            offset: 0,
+          });
+
+          if (!alive) return;
+          setLogs(data);
+        } catch (err) {
+          if (!alive) return;
+          setStatus(getApiErrorMessage(err) || "Failed to load maintenance logs.");
+        } finally {
+          if (alive) setLoadingLogs(false);
+        }
+      })();
+    }, 250);
+
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [filterMachineId, query]);
 
   const selectedMachine = useMemo(() => {
     if (machineId === "") return null;
@@ -115,26 +118,11 @@ export default function Maintenance() {
   }, [filterMachineId, machines]);
 
   const filteredLogs = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return logs
-      .filter((l) => {
-        if (filterMachineId !== "ALL" && l.machine_id !== filterMachineId) return false;
-        if (!q) return true;
-
-        const hay = [
-          l.machine_name,
-          l.reason,
-          l.notes ?? "",
-          l.started_at,
-          l.ended_at ?? "",
-        ]
-          .join(" ")
-          .toLowerCase();
-
-        return hay.includes(q);
-      })
-      .sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime());
-  }, [logs, filterMachineId, query]);
+    // Backend already filters by q/machine_id; keep stable ordering here.
+    return [...logs].sort(
+      (a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
+    );
+  }, [logs]);
 
   function resetForm(keepMachine = true) {
     if (!keepMachine) setMachineId("");
@@ -157,7 +145,26 @@ export default function Maintenance() {
     return null;
   }
 
-  function addLog() {
+  async function refreshLogs() {
+    setStatus("");
+    setLoadingLogs(true);
+    try {
+      const machine_id = filterMachineId === "ALL" ? undefined : Number(filterMachineId);
+      const q = query.trim() ? query.trim() : undefined;
+
+      const data = await listMaintenanceLogs({ machine_id, q, limit: 200, offset: 0 });
+      setLogs(data);
+
+      setStatus("Refreshed ✅");
+      setTimeout(() => setStatus(""), 900);
+    } catch (err) {
+      setStatus(getApiErrorMessage(err) || "Failed to refresh maintenance logs.");
+    } finally {
+      setLoadingLogs(false);
+    }
+  }
+
+  async function addLog() {
     setStatus("");
 
     const err = validate();
@@ -166,39 +173,42 @@ export default function Maintenance() {
       return;
     }
 
-    const m = machines.find((x) => x.id === Number(machineId));
-    if (!m) {
-      setStatus("Selected machine not found.");
-      return;
+    try {
+      const created = await createMaintenanceLog({
+        machine_id: Number(machineId),
+        reason: reason.trim(),
+        started_at: toIsoFromDatetimeLocal(startedAtLocal),
+        ended_at: endedAtLocal ? toIsoFromDatetimeLocal(endedAtLocal) : null,
+        notes: notes.trim() ? notes.trim() : null,
+      });
+
+      // Optimistic prepend
+      setLogs((prev) => [created, ...prev]);
+
+      setStatus("Maintenance log added ✅");
+      resetForm(true);
+      setTimeout(() => setStatus(""), 1200);
+    } catch (err2) {
+      setStatus(getApiErrorMessage(err2) || "Failed to create maintenance log.");
     }
-
-    const log: MaintenanceLog = {
-      id: uuidLike(),
-      machine_id: m.id,
-      machine_name: m.machine_name,
-      reason: reason.trim(),
-      started_at: toIsoFromDatetimeLocal(startedAtLocal),
-      ended_at: endedAtLocal ? toIsoFromDatetimeLocal(endedAtLocal) : null,
-      notes: notes.trim() ? notes.trim() : null,
-      created_at: new Date().toISOString(),
-      created_by: null, // future
-    };
-
-    setLogs((prev) => [log, ...prev]);
-    setStatus("Maintenance log added ✅");
-    resetForm(true);
-    setTimeout(() => setStatus(""), 1200);
   }
 
-  function deleteLog(id: string) {
+  async function deleteLog(id: string) {
     if (!confirm("Delete this maintenance entry? This cannot be undone.")) return;
-    setLogs((prev) => prev.filter((x) => x.id !== id));
-    setStatus("Deleted ✅");
-    setTimeout(() => setStatus(""), 1200);
+
+    setStatus("");
+    try {
+      await deleteMaintenanceLog(id);
+      setLogs((prev) => prev.filter((x) => x.id !== id));
+      setStatus("Deleted ✅");
+      setTimeout(() => setStatus(""), 1200);
+    } catch (err) {
+      setStatus(getApiErrorMessage(err) || "Failed to delete maintenance log.");
+    }
   }
 
   function exportJson() {
-    const blob = new Blob([JSON.stringify(logs, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify(filteredLogs, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -207,13 +217,6 @@ export default function Maintenance() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  }
-
-  function clearAll() {
-    if (!confirm("Clear ALL maintenance logs stored locally? This cannot be undone.")) return;
-    setLogs([]);
-    setStatus("All logs cleared ✅");
-    setTimeout(() => setStatus(""), 1200);
   }
 
   return (
@@ -228,11 +231,12 @@ export default function Maintenance() {
         </div>
 
         <div className="d-flex gap-2">
-          <button className="btn btn-outline-secondary btn-sm" onClick={exportJson} disabled={!logs.length}>
+          <button className="btn btn-outline-secondary btn-sm" onClick={exportJson} disabled={!filteredLogs.length}>
             <i className="bi bi-download" aria-hidden="true" /> Export JSON
           </button>
-          <button className="btn btn-outline-danger btn-sm" onClick={clearAll} disabled={!logs.length}>
-            <i className="bi bi-trash" aria-hidden="true" /> Clear all
+
+          <button className="btn btn-outline-primary btn-sm" onClick={refreshLogs} disabled={loadingLogs}>
+            <i className="bi bi-arrow-clockwise" aria-hidden="true" /> Refresh
           </button>
         </div>
       </div>
@@ -305,9 +309,7 @@ export default function Maintenance() {
                 value={endedAtLocal}
                 onChange={(e) => setEndedAtLocal(e.target.value)}
               />
-              <div className="text-secondary small mt-1">
-                Optional. Leave blank if the work is ongoing.
-              </div>
+              <div className="text-secondary small mt-1">Optional. Leave blank if the work is ongoing.</div>
             </div>
 
             <div className="col-12">
@@ -323,17 +325,12 @@ export default function Maintenance() {
           </div>
 
           <div className="d-flex justify-content-between align-items-center mt-3">
-            <div className="text-secondary small">
-              Stored locally for now (MVP). We can wire this to the backend later.
-            </div>
+            <div className="text-secondary small">Stored in the database (shared audit trail).</div>
             <div className="d-flex gap-2">
               <button className="btn btn-primary btn-sm" onClick={addLog}>
                 <i className="bi bi-plus-circle" aria-hidden="true" /> Add entry
               </button>
-              <button
-                className="btn btn-outline-secondary btn-sm"
-                onClick={() => resetForm(false)}
-              >
+              <button className="btn btn-outline-secondary btn-sm" onClick={() => resetForm(false)}>
                 Reset
               </button>
             </div>
@@ -348,6 +345,7 @@ export default function Maintenance() {
             <i className="bi bi-journal-text" aria-hidden="true" />
             <strong>Maintenance audit log</strong>
             <span className="text-secondary small">({filteredLogs.length})</span>
+            {loadingLogs && <span className="text-secondary small ms-2">Loading…</span>}
           </div>
 
           <div className="d-flex gap-2 align-items-center">
@@ -356,6 +354,7 @@ export default function Maintenance() {
               style={{ width: 220 }}
               value={filterMachineId === "ALL" ? "ALL" : String(filterMachineId)}
               onChange={(e) => setFilterMachineId(e.target.value === "ALL" ? "ALL" : Number(e.target.value))}
+              disabled={loadingMachines}
             >
               <option value="ALL">All machines</option>
               {machines.map((m) => (
@@ -391,7 +390,9 @@ export default function Maintenance() {
                   <th style={{ width: "18%" }}>Start</th>
                   <th style={{ width: "18%" }}>End</th>
                   <th>Notes</th>
-                  <th className="text-end" style={{ width: "8%" }}>Actions</th>
+                  <th className="text-end" style={{ width: "8%" }}>
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -400,7 +401,13 @@ export default function Maintenance() {
                     <td className="fw-semibold">{l.machine_name}</td>
                     <td>{l.reason}</td>
                     <td>{formatDateTime(l.started_at)}</td>
-                    <td>{l.ended_at ? formatDateTime(l.ended_at) : <span className="badge bg-secondary">Ongoing</span>}</td>
+                    <td>
+                      {l.ended_at ? (
+                        formatDateTime(l.ended_at)
+                      ) : (
+                        <span className="badge bg-secondary">Ongoing</span>
+                      )}
+                    </td>
                     <td className="text-secondary">{l.notes ?? "—"}</td>
                     <td className="text-end">
                       <button
@@ -414,7 +421,7 @@ export default function Maintenance() {
                   </tr>
                 ))}
 
-                {filteredLogs.length === 0 && (
+                {!loadingLogs && filteredLogs.length === 0 && (
                   <tr>
                     <td colSpan={6} className="text-center text-secondary py-4">
                       No maintenance entries yet. Add one above to start the audit log.
