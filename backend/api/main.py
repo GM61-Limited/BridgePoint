@@ -41,7 +41,8 @@ app = FastAPI(
 # -------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in settings.ALLOWED_ORIGINS if o.strip()],
+    # ✅ settings.ALLOWED_ORIGINS is now a string (CSV or JSON); this property returns list[str]
+    allow_origins=settings.allowed_origins_list,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
@@ -103,17 +104,3 @@ except Exception as e:
 
 # (Optional) if you add the connectors routes:
 # app.include_router(connectors_router)
-
-
-# ----------------------------------------------------------------------
-# OPTIONAL: If you want the app to ensure certain tables exist on startup
-# (useful only if you add app/db/migrations_connectors.py later),
-# you can uncomment this block and provide the engine + migration helper.
-# ----------------------------------------------------------------------
-# from app.db.connection import engine  # AsyncEngine
-# from app.db.migrations_connectors import ensure_connectors_schema
-#
-# @app.on_event("startup")
-# async def startup():
-#     async with engine.begin() as conn:
-#         await ensure_connectors_schema(conn)

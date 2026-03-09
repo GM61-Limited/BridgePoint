@@ -1,0 +1,64 @@
+location: uksouth
+name: bridgepoint
+type: Microsoft.App/containerApps
+
+properties:
+  managedEnvironmentId: /subscriptions/70456c49-6812-4cac-8cb1-34f6fe0d29e5/resourceGroups/BridgePoint/providers/Microsoft.App/managedEnvironments/BridgePoint-env
+
+  configuration:
+    activeRevisionsMode: Single
+
+    ingress:
+      external: true
+      targetPort: 80
+      transport: auto
+      allowInsecure: false
+
+    registries:
+      - server: gm61bridgepoint.azurecr.io
+        username: GM61Bridgepoint          # from: az acr credential show -n GM61Bridgepoint
+        passwordSecretRef: acr-password
+
+    secrets:
+      - name: acr-password
+        value: 2g3xE2L6KmiM0Z8fukOd5Oeu6bZuY2lOks1OW0GdD7vI0vZYhBF0JQQJ99CAACmepeSEqg7NAAACAZCReGQ0            # from: az acr credential show -n GM61Bridgepoint
+
+      - name: db-password
+        value: N3wH0us3farm!
+
+      - name: jwt-secret
+        value: eplace_me_in_prod
+
+  template:
+    scale:
+      minReplicas: 1
+      maxReplicas: 1
+
+    containers:
+      - name: frontend
+        image: gm61bridgepoint.azurecr.io/bridgepoint-frontend:v5
+        resources:
+          cpu: 0.5
+          memory: 1Gi
+        env:
+          - name: VITE_API_BASE_URL
+            value: http://localhost:8000
+
+      - name: backend
+        image: gm61bridgepoint.azurecr.io/bridgepoint-backend:v5
+        resources:
+          cpu: 0.5
+          memory: 1Gi
+        env:
+          - name: DATABASE_HOST
+            value: bridgepoint-db.postgres.database.azure.com
+          - name: DATABASE_PORT
+            value: "5432"
+          - name: DATABASE_NAME
+            value: bridgepointdb
+          - name: DATABASE_USER
+            value: GM61
+          - name: DATABASE_PASSWORD
+            secretRef: db-password
+          - name: JWT_SECRET
+            secretRef: jwt-secret

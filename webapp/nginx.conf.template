@@ -1,0 +1,96 @@
+# default.conf.template
+# Processed by envsubst at container startup in the official nginx image.
+
+# Provide defaults so nginx doesn't fail hard if env vars are missing.
+# envsubst doesn't support Bash-style defaults, so we do it by ensuring env vars are set in Container Apps / Compose.
+# (Keep this comment as a reminder.)
+
+upstream backend_upstream {
+    server ${BACKEND_HOST}:${BACKEND_PORT};
+    keepalive 32;
+}
+
+log_format upstreamlog
+  '$remote_addr - $remote_user [$time_local] '
+  '"$request" $status $body_bytes_sent '
+  '"$http_referer" "$http_user_agent" '
+  'host="$host" upstream_addr="$upstream_addr" upstream_status="$upstream_status" '
+  'req_time="$request_time" upstream_time="$upstream_response_time"';
+
+server {
+  listen 80;
+  server_name _;
+
+  access_log /var/log/nginx/access.log upstreamlog;
+
+  root /usr/share/nginx/html;
+  index index.html;
+
+  location /assets/ { try_files $uri =404; }
+  location /images/ { try_files $uri =404; }
+
+  # Explicit auth mapping
+  location = /api/login {
+    client_max_body_size 100m;
+
+    proxy_pass ${BACKEND_SCHEME}://backend_upstream${BACKEND_LOGIN_PATH};
+    proxy_http_version 1.1;
+
+    # Prefer passing through the original host unless you have a reason to override:
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Host $host;
+
+    proxy_set_header X-Real-IP          $remote_addr;
+    proxy_set_header X-Forwarded-For    $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto  $scheme;
+    proxy_set_header X-Forwarded-Prefix /api;
+
+    # Only relevant if BACKEND_SCHEME=https (won't hurt on http):
+    proxy_ssl_server_name on;
+
+    proxy_connect_timeout 5s;
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+  }
+
+  # Generic API gateway: /api/* -> /*  (strips /api/ prefix)
+  location /api/ {
+    client_max_body_size 100m;
+
+    proxy_pass ${BACKEND_SCHEME}://backend_upstream/;
+    proxy_http_version 1.1;
+
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Host $host;
+
+    proxy_set_header X-Real-IP          $remote_addr;
+    proxy_set_header X-Forwarded-For    $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto  $scheme;
+    proxy_set_header X-Forwarded-Prefix /api;
+
+    proxy_ssl_server_name on;
+
+    proxy_connect_timeout 5s;
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+  }
+
+  location /auth/ {
+    proxy_pass ${BACKEND_SCHEME}://backend_upstream/auth/;
+    proxy_http_version 1.1;
+
+    proxy_ssl_server_name on;
+
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Host $host;
+
+    proxy_set_header X-Real-IP          $remote_addr;
+    proxy_set_header X-Forwarded-For    $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto  $scheme;
+    proxy_set_header X-Forwarded-Prefix /auth;
+  }
+
+  location / {
+    try_files $uri /index.html;
+  }
+}

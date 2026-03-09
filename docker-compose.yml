@@ -3,10 +3,17 @@ services:
     build:
       context: ./webapp
       args:
+        # Used at build time by Vite.
+        # Keep this relative so the browser always calls /api
         API_BASE_URL: /api
     container_name: BridgePointWebServer
     ports:
       - "80:80"
+    environment:
+      # Runtime config for Nginx (used by envsubst)
+      BACKEND_HOST: backend
+      BACKEND_PORT: "8000"
+      BACKEND_SCHEME: http
     networks:
       - bridgepoint-network
     depends_on:
@@ -16,14 +23,27 @@ services:
     build:
       context: ./backend
     container_name: BridgePointBackend
+
+    # Load the backend environment exactly like it will work in Azure
+    # (env vars injected at runtime; not baked into the image).
+    env_file:
+      - ./backend/.env
+
     environment:
+      # Provide a single canonical DB URL for LOCAL dev.
+      # Your backend should prefer DATABASE_URL when present.
+      DATABASE_URL: postgresql://gm61admin:camioninsta@database:5432/bridgepointdb
+
+      # Keep DB_* as well (fallback / compatibility / your current .env approach)
       DB_HOST: database
-      DB_PORT: 5432
+      DB_PORT: "5432"
       DB_NAME: bridgepointdb
       DB_USER: gm61admin
       DB_PASSWORD: camioninsta
+
+      # Upload settings (you already use these)
       UPLOAD_BASE_DIR: /data/uploads
-      MAX_UPLOAD_MB: 25
+      MAX_UPLOAD_MB: "25"
     volumes:
       - uploads:/data/uploads
     networks:
@@ -32,10 +52,8 @@ services:
       - database
 
   database:
-    build:
-      context: ./database
-    container_name: BridgePointDatabase
     image: postgres
+    container_name: BridgePointDatabase
     ports:
       - "5432:5432"
     environment:
