@@ -63,10 +63,10 @@ export default function WashCycles() {
   const [fromDate, setFromDate] = useState<string>("");
   const [toDate, setToDate] = useState<string>("");
 
-  // ✅ New: cycle number search (string so we can allow partial)
+  // Cycle number search (string so we can allow partial)
   const [cycleSearch, setCycleSearch] = useState<string>("");
 
-  // ✅ New: pagination state
+  // Pagination state
   const [pageSize, setPageSize] = useState<number>(50); // default
   const [pageIndex, setPageIndex] = useState<number>(0); // 0-based
 
@@ -107,7 +107,7 @@ export default function WashCycles() {
     return Array.from(new Set(rows.map((r) => r.program).filter((p) => p && p !== "—"))).sort();
   }, [rows]);
 
-  // ✅ Resolve machine scope from query params
+  // Resolve machine scope from query params
   useEffect(() => {
     // If machineId is provided and valid -> lock to it
     if (machineIdParam) {
@@ -175,7 +175,7 @@ export default function WashCycles() {
         if (new Date(r.start) > to) return false;
       }
 
-      // ✅ Cycle number search (partial match)
+      // Cycle number search (partial match)
       if (q) {
         const cycleNoStr = r.cycleNo === null || r.cycleNo === undefined ? "" : String(r.cycleNo);
         if (!cycleNoStr.includes(q)) return false;
@@ -185,12 +185,12 @@ export default function WashCycles() {
     });
   }, [rows, filterMachineId, filterProgram, fromDate, toDate, cycleSearch]);
 
-  // ✅ Reset to page 1 when filters/search/page size change (avoids empty pages)
+  // Reset to page 1 when filters/search/page size change (avoids empty pages)
   useEffect(() => {
     setPageIndex(0);
   }, [filterMachineId, filterProgram, fromDate, toDate, cycleSearch, pageSize]);
 
-  // ✅ Pagination derived values
+  // Pagination derived values
   const totalFiltered = filtered.length;
   const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize));
   const safePageIndex = Math.min(pageIndex, totalPages - 1);
@@ -224,7 +224,7 @@ export default function WashCycles() {
     setParams(newParams, { replace: true });
   }
 
-  // ✅ AUTHENTICATED XML DOWNLOAD
+  // AUTHENTICATED XML DOWNLOAD
   async function downloadXml(cycleId: number) {
     try {
       const response = await api.get(`/v1/washer-cycles/${cycleId}/download`, {
@@ -254,7 +254,7 @@ export default function WashCycles() {
     }
   }
 
-  // ✅ DELETE CYCLE
+  // DELETE CYCLE
   async function deleteCycle(cycleId: number) {
     if (!confirm("Delete this cycle? This cannot be undone.")) return;
 
@@ -279,25 +279,41 @@ export default function WashCycles() {
   const canPrev = safePageIndex > 0;
   const canNext = safePageIndex < totalPages - 1;
 
+  /**
+   * ✅ Scope-preserving "returnTo"
+   * This is the URL we want Upload/Details to return to.
+   */
+  const currentSearch = params.toString();
+  const returnTo = currentSearch ? `/wash-cycles?${currentSearch}` : "/wash-cycles";
+
+  /**
+   * ✅ Upload link should include machineId (if scoped) AND returnTo
+   * so the upload page can navigate back to the same filtered view.
+   */
+  const uploadTo = useMemo(() => {
+    const q = new URLSearchParams();
+
+    // preserve scope for upload
+    if (filterMachineId !== "ALL") q.set("machineId", String(filterMachineId));
+    if (filterMachineId !== "ALL" && displayMachineLabel) q.set("machine", displayMachineLabel);
+
+    // always provide a return target
+    q.set("returnTo", returnTo);
+
+    return `/wash-cycles/upload?${q.toString()}`;
+  }, [filterMachineId, displayMachineLabel, returnTo]);
+
   return (
     <div className="container py-4">
       {/* Header */}
       <div className="d-flex align-items-center justify-content-between mb-3">
         <div>
           <h1 className="h4 mb-0">Cycles{titleSuffix}</h1>
-          <div className="text-secondary small">
-            {statusMsg || " "}
-          </div>
+          <div className="text-secondary small">{statusMsg || " "}</div>
         </div>
 
-        <Link
-          to={
-            filterMachineId !== "ALL"
-              ? `/wash-cycles/upload?machineId=${encodeURIComponent(String(filterMachineId))}`
-              : "/wash-cycles/upload"
-          }
-          className="btn btn-primary btn-sm d-flex align-items-center gap-1"
-        >
+        {/* ✅ Use uploadTo (includes returnTo so Upload can come back scoped) */}
+        <Link to={uploadTo} className="btn btn-primary btn-sm d-flex align-items-center gap-1">
           <i className="bi bi-upload" />
           Upload cycles
         </Link>
@@ -307,8 +323,7 @@ export default function WashCycles() {
       <div className="d-flex flex-wrap gap-3 mb-3 align-items-end">
         <div>
           <label className="form-label small">
-            Machine{" "}
-            {machineLocked ? <span className="text-secondary">(locked)</span> : null}
+            Machine {machineLocked ? <span className="text-secondary">(locked)</span> : null}
           </label>
           <select
             value={filterMachineId === "ALL" ? "ALL" : String(filterMachineId)}
@@ -366,7 +381,7 @@ export default function WashCycles() {
           />
         </div>
 
-        {/* ✅ New: cycle number search */}
+        {/* Cycle number search */}
         <div>
           <label className="form-label small">Cycle #</label>
           <input
@@ -381,7 +396,7 @@ export default function WashCycles() {
           />
         </div>
 
-        {/* ✅ New: page size selector */}
+        {/* Page size selector */}
         <div>
           <label className="form-label small">Rows</label>
           <select
@@ -461,49 +476,61 @@ export default function WashCycles() {
             </thead>
 
             <tbody>
-              {paged.map((r) => (
-                <tr key={r.id}>
-                  <td>{r.cycleNo ? `#${r.cycleNo}` : "—"}</td>
-                  <td>{r.machineName}</td>
-                  <td>{r.program}</td>
-                  <td>{formatDateTime(r.start)}</td>
-                  <td>{formatDateTime(r.end)}</td>
-                  <td>
-                    <span
-                      className={
-                        r.result === "PASS"
-                          ? "badge bg-success"
-                          : r.result === "FAIL"
-                          ? "badge bg-danger"
-                          : "badge bg-secondary"
-                      }
-                    >
-                      {r.result}
-                    </span>
-                  </td>
-                  <td className="text-end">
-                    <div className="d-inline-flex gap-2">
-                      <Link to={`/wash-cycles/${r.id}`} className="btn btn-primary btn-sm">
-                        View details
-                      </Link>
-                      <button
-                        className="btn btn-primary btn-sm"
-                        title="Download XML"
-                        onClick={() => downloadXml(r.id)}
+              {paged.map((r) => {
+                // ✅ Preserve current scope when going to details
+                const detailParams = new URLSearchParams(params);
+                detailParams.set("returnTo", returnTo);
+
+                return (
+                  <tr key={r.id}>
+                    <td>{r.cycleNo ? `#${r.cycleNo}` : "—"}</td>
+                    <td>{r.machineName}</td>
+                    <td>{r.program}</td>
+                    <td>{formatDateTime(r.start)}</td>
+                    <td>{formatDateTime(r.end)}</td>
+                    <td>
+                      <span
+                        className={
+                          r.result === "PASS"
+                            ? "badge bg-success"
+                            : r.result === "FAIL"
+                            ? "badge bg-danger"
+                            : "badge bg-secondary"
+                        }
                       >
-                        <i className="bi bi-download" />
-                      </button>
-                      <button
-                        className="btn btn-outline-danger btn-sm"
-                        title="Delete cycle"
-                        onClick={() => deleteCycle(r.id)}
-                      >
-                        <i className="bi bi-trash" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                        {r.result}
+                      </span>
+                    </td>
+                    <td className="text-end">
+                      <div className="d-inline-flex gap-2">
+                        {/* ✅ View details preserves scope + includes returnTo */}
+                        <Link
+                          to={`/wash-cycles/${r.id}?${detailParams.toString()}`}
+                          className="btn btn-primary btn-sm"
+                        >
+                          View details
+                        </Link>
+
+                        <button
+                          className="btn btn-primary btn-sm"
+                          title="Download XML"
+                          onClick={() => downloadXml(r.id)}
+                        >
+                          <i className="bi bi-download" />
+                        </button>
+
+                        <button
+                          className="btn btn-outline-danger btn-sm"
+                          title="Delete cycle"
+                          onClick={() => deleteCycle(r.id)}
+                        >
+                          <i className="bi bi-trash" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
 
               {!loading && filtered.length === 0 && (
                 <tr>

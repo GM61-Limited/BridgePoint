@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
   getWasherCycle,
   getWasherCycleTelemetry,
@@ -139,13 +139,34 @@ ChartJS.register(plotBackgroundPlugin);
 
 export default function WashCycleDetails() {
   const { id } = useParams<{ id: string }>();
+  const [params] = useSearchParams();
 
   const [cycle, setCycle] = useState<WasherCycle | null>(null);
   const [telemetry, setTelemetry] = useState<TelemetrySeries[]>([]);
-  const [validation, setValidation] = useState<"PASS" | "FAIL" | "UNKNOWN">(
-    "UNKNOWN"
-  );
+  const [validation, setValidation] = useState<"PASS" | "FAIL" | "UNKNOWN">("UNKNOWN");
   const [loading, setLoading] = useState(true);
+
+  /**
+   * ✅ Scope-preserving back link
+   * Prefer returnTo; fallback to machineId/machine; else /wash-cycles.
+   */
+  const backToCyclesHref = useMemo(() => {
+    const rt = (params.get("returnTo") || "").trim();
+
+    // Prevent open redirects: only allow internal return to cycles.
+    if (rt && rt.startsWith("/wash-cycles")) return rt;
+
+    // Fallback: rebuild from machineId (+ optional machine label)
+    const machineId = params.get("machineId") || params.get("device");
+    const machineLabel = params.get("machine");
+
+    const q = new URLSearchParams();
+    if (machineId) q.set("machineId", machineId);
+    if (machineLabel) q.set("machine", machineLabel);
+
+    const qs = q.toString();
+    return `/wash-cycles${qs ? `?${qs}` : ""}`;
+  }, [params]);
 
   /* --------------------------------------------------
      Load data
@@ -194,11 +215,7 @@ export default function WashCycleDetails() {
   }, [telemetry]);
 
   /* --------------------------------------------------
-     Telemetry chart (restore “known working” approach)
-     - x is timestamp_ms (not elapsed seconds)
-     - linear scale
-     - stepSize = 1 minute
-     - label format HH:mm:ss
+     Telemetry chart
   -------------------------------------------------- */
 
   const datasets = useMemo(() => {
@@ -250,7 +267,7 @@ export default function WashCycleDetails() {
           title: { display: true, text: "Time", color: axisText },
           grid: { color: grid },
           ticks: {
-            stepSize: 60_000, // ✅ every minute
+            stepSize: 60_000, // every minute
             autoSkip: true,
             maxTicksLimit: 18,
             maxRotation: 65,
@@ -290,10 +307,10 @@ export default function WashCycleDetails() {
 
   if (loading || !cycle) return <div className="container py-4">Loading…</div>;
 
-  const stages = cycle.extra?.stages ?? {};
+  const stages = (cycle as any).extra?.stages ?? {};
 
-  const startedAt = cycle.started_at;
-  const endedAt = (cycle as any)?.ended_at as string | undefined;
+  const startedAt = (cycle as any).started_at as string | undefined;
+  const endedAt = (cycle as any).ended_at as string | undefined;
   const durationSeconds =
     (cycle as any)?.duration_seconds ??
     (startedAt && endedAt
@@ -308,13 +325,13 @@ export default function WashCycleDetails() {
     return `${start} → ${end}`;
   };
 
-  const formatTemp = (value?: number) =>
-    value !== undefined ? `${value} °C` : "—";
+  const formatTemp = (value?: number) => (value !== undefined ? `${value} °C` : "—");
 
   return (
     <div className="container py-4">
       <div className="d-flex align-items-center justify-content-between mb-3">
-        <Link to="/wash-cycles" className="btn btn-link btn-sm">
+        {/* ✅ Back respects machine scope */}
+        <Link to={backToCyclesHref} className="btn btn-link btn-sm">
           ← Back to cycles
         </Link>
       </div>
@@ -323,24 +340,18 @@ export default function WashCycleDetails() {
       <div className="card mb-3">
         <div className="card-body">
           <div className="d-flex align-items-center gap-2 mb-2">
-            <h1 className="h4 mb-0">
-              Cycle {cycle.cycle_number ? `#${cycle.cycle_number}` : ""}
-            </h1>
+            <h1 className="h4 mb-0">Cycle {cycle.cycle_number ? `#${cycle.cycle_number}` : ""}</h1>
             <span className={`badge ${badgeClass(validation)}`}>
-              {validation === "PASS"
-                ? "Cycle OK"
-                : validation === "FAIL"
-                ? "Cycle FAIL"
-                : "Unknown"}
+              {validation === "PASS" ? "Cycle OK" : validation === "FAIL" ? "Cycle FAIL" : "Unknown"}
             </span>
           </div>
 
           <div className="text-secondary small">
             <div>
-              <strong>Machine:</strong> {cycle.machine_name}
+              <strong>Machine:</strong> {(cycle as any).machine_name}
             </div>
             <div>
-              <strong>Program:</strong> {cycle.program_name ?? "—"}
+              <strong>Program:</strong> {(cycle as any).program_name ?? "—"}
             </div>
             <div>
               <strong>Start:</strong> {formatDateTime(startedAt)}
@@ -373,8 +384,7 @@ export default function WashCycleDetails() {
             Debug: datasets={datasets.length} • points=
             {datasets.reduce((a: number, d: any) => a + (d.data?.length ?? 0), 0)}
             {" • xRange="}
-            {new Date(xRange.min).toLocaleTimeString()} →{" "}
-            {new Date(xRange.max).toLocaleTimeString()}
+            {new Date(xRange.min).toLocaleTimeString()} → {new Date(xRange.max).toLocaleTimeString()}
           </div>
         </div>
       </div>
@@ -418,9 +428,7 @@ export default function WashCycleDetails() {
               </tr>
               <tr>
                 <td>Disinfection Temp</td>
-                <td className="text-end">
-                  {formatTemp(stages.disinfection?.temperature_c)}
-                </td>
+                <td className="text-end">{formatTemp(stages.disinfection?.temperature_c)}</td>
               </tr>
 
               <tr>

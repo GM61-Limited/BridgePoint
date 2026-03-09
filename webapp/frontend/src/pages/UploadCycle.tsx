@@ -16,7 +16,11 @@ type UploadItem = {
 
 export default function UploadCycle() {
   const [params, setParams] = useSearchParams();
-  const machineIdParam = params.get("machineId");
+
+  // ✅ Support preferred + legacy param names
+  const machineIdParam = params.get("machineId") || params.get("device");
+  const machineLabelParam = params.get("machine"); // optional/friendly label
+  const returnToParam = params.get("returnTo");
 
   const [status, setStatus] = useState<string>("");
   const [busy, setBusy] = useState(false);
@@ -32,6 +36,25 @@ export default function UploadCycle() {
 
   const [items, setItems] = useState<UploadItem[]>([]);
   const [dragOver, setDragOver] = useState(false);
+
+  /**
+   * ✅ Safe "back to cycles" target
+   * Prefer returnTo (from cycles page), otherwise fall back to machine-scoped cycles.
+   */
+  const cyclesHref = useMemo(() => {
+    const rt = (returnToParam || "").trim();
+
+    // Only allow internal app routes (avoid open redirects).
+    if (rt && rt.startsWith("/wash-cycles")) return rt;
+
+    // Fallback: preserve machine scope if present
+    const q = new URLSearchParams();
+    if (machineIdParam) q.set("machineId", machineIdParam);
+    if (machineLabelParam) q.set("machine", machineLabelParam);
+
+    const qs = q.toString();
+    return `/wash-cycles${qs ? `?${qs}` : ""}`;
+  }, [returnToParam, machineIdParam, machineLabelParam]);
 
   // ------------------------------------
   // Load machines + apply scope
@@ -120,11 +143,21 @@ export default function UploadCycle() {
     setItems([]);
   }
 
-  // Allow user to switch machine even when scoped, by “unscoping” the URL.
+  /**
+   * ✅ Allow user to switch machine even when scoped, by “unscoping” the URL.
+   * IMPORTANT: preserve returnTo so the user still goes back to the right cycles list.
+   */
   function changeMachine() {
     if (busy) return;
     const next = new URLSearchParams(params);
+
     next.delete("machineId");
+    next.delete("device");
+    next.delete("machine");
+
+    // keep returnTo if present
+    // (do not delete next.delete("returnTo"))
+
     setParams(next, { replace: true });
     setScopedToMachine(false);
     // keep current machineId so dropdown is prefilled; user can change it
@@ -249,9 +282,11 @@ export default function UploadCycle() {
         </div>
 
         <div className="d-flex gap-2">
-          <Link to="/wash-cycles" className="btn btn-outline-secondary btn-sm">
+          {/* ✅ Back to the correct scoped cycles list */}
+          <Link to={cyclesHref} className="btn btn-outline-secondary btn-sm">
             Go to Cycles
           </Link>
+
           <Link to="/machines" className="btn btn-outline-secondary btn-sm">
             Go to Machines
           </Link>
@@ -295,7 +330,7 @@ export default function UploadCycle() {
             }`}
             style={{
               cursor: "pointer",
-              minHeight: 220, // ✅ larger
+              minHeight: 220, // larger
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
