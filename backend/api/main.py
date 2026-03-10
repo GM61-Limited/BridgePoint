@@ -149,22 +149,25 @@ app.include_router(washer_cycles_router)
 app.include_router(maintenance_router)
 
 # ✅ Register Audit Logs API (safe optional import so backend never fails to boot)
+# IMPORTANT: log.exception prints the full traceback, so we can see why it failed to import/register.
 try:
     from app.api.v1.audit_logs_routes import router as audit_logs_router
     app.include_router(audit_logs_router)
-    log.info("Audit Logs API enabled: /api/v1/audit-logs")
-except Exception as e:
-    # IMPORTANT: don't crash the entire backend if audit logs file isn't present in the image yet
-    log.warning("Audit Logs API NOT enabled (audit_logs_routes missing or failed to import): %s", e)
+    # Your router prefix is /v1/audit-logs; via nginx it is reachable at /api/v1/audit-logs
+    log.info("Audit Logs API enabled: /v1/audit-logs (proxied via /api/v1/audit-logs)")
+except Exception:
+    # IMPORTANT: don't crash the entire backend if audit logs file isn't present in the image yet,
+    # but DO print full traceback so we can fix it quickly.
+    log.exception("Audit Logs API NOT enabled (audit_logs_routes missing or failed to import)")
 
 # ✅ Register Uploads API (safe optional import so backend never fails to boot)
 try:
     from app.api.v1.uploads_routes import router as uploads_router
     app.include_router(uploads_router)
     log.info("Uploads API enabled: /v1/uploads/*")
-except Exception as e:
+except Exception:
     # IMPORTANT: don't crash the entire backend if uploads file isn't present in the image yet
-    log.warning("Uploads API NOT enabled (uploads_routes missing or failed to import): %s", e)
+    log.exception("Uploads API NOT enabled (uploads_routes missing or failed to import)")
 
 # (Optional) if you add the connectors routes:
 # app.include_router(connectors_router)
