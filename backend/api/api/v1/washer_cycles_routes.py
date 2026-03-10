@@ -1,5 +1,7 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
+
+from app.core.audit import audit_success, audit_fail
 from app.db.connection import get_db_connection
 
 router = APIRouter(prefix="/v1/washer-cycles", tags=["Washer Cycles"])
@@ -106,17 +108,24 @@ def get_washer_cycle(cycle_id: int):
 
 
 # ==================================================
-# DOWNLOAD ORIGINAL XML
+# DOWNLOAD ORIGINAL XML (AUDITED)
 # ==================================================
 @router.get("/{cycle_id}/download")
-def download_washer_cycle_xml(cycle_id: int):
+def download_washer_cycle_xml(cycle_id: int, request: Request):
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
+            # Include environment_id + machine details so audit record is rich
             cur.execute(
                 """
-                SELECT wx.stored_path, wx.original_filename
+                SELECT
+                    wx.stored_path,
+                    wx.original_filename,
+                    wc.machine_id,
+                    m.machine_name,
+                    m.environment_id
                 FROM washer_cycles wc
+                JOIN machines m ON m.id = wc.machine_id
                 JOIN washer_xml_uploads wx ON wx.id = wc.upload_id
                 WHERE wc.id = %s
                 """,
@@ -125,9 +134,34 @@ def download_washer_cycle_xml(cycle_id: int):
             row = cur.fetchone()
 
         if not row:
+            audit_fail(
+                action="CYCLE_XML_DOWNLOAD_NOT_FOUND",
+                request=request,
+                env_id=1,
+                user_id=None,
+                entity_type="cycle",
+                entity_id=cycle_id,
+                message="Cycle not found for download",
+            )
             raise HTTPException(status_code=404, detail="Cycle not found")
 
-        stored_path, original_filename = row
+        stored_path, original_filename, machine_id, machine_name, env_id = row
+
+        # Audit success (do NOT log absolute path)
+        audit_success(
+            action="CYCLE_XML_DOWNLOADED",
+            request=request,
+            env_id=int(env_id) if env_id is not None else 1,
+            user_id=None,
+            entity_type="cycle",
+            entity_id=cycle_id,
+            message="Cycle XML downloaded",
+            extra={
+                "machine_id": machine_id,
+                "machine_name": machine_name,
+                "original_filename": original_filename,
+            },
+        )
 
         return FileResponse(
             path=stored_path,
@@ -139,27 +173,102 @@ def download_washer_cycle_xml(cycle_id: int):
 
 
 # ==================================================
-# DELETE CYCLE
+# DELETE CYCLE (AUDITED)
 # ==================================================
 @router.delete("/{cycle_id}")
-def delete_washer_cycle(cycle_id: int):
+def delete_washer_cycle(cycle_id: int, request: Request):
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
+            # Fetch details for audit context
             cur.execute(
-                "SELECT 1 FROM washer_cycles WHERE id = %s",
+                """
+                SELECT
+                    wc.id,
+                    wc.machine_id,
+                    m.machine_name,
+                    m.environment_id,
+                    wc.cycle_number,
+                    wc.started_at,
+                    wc.ended_at,
+                    wc.result
+                FROM washer_cycles wc
+                JOIN machines m ON m.id = wc.machine_id
+                WHERE wc.id = %s
+                """,
                 (cycle_id,),
             )
-            if not cur.fetchone():
+            row = cur.fetchone()
+
+            if not row:
+                audit_fail(
+                    action="CYCLE_DELETE_NOT_FOUND",
+                    request=request,
+                    env_id=1,
+                    user_id=None,
+                    entity_type="cycle",
+                    entity_id=cycle_id,
+                    message="Cycle not found for delete",
+                )
                 raise HTTPException(status_code=404, detail="Cycle not found")
 
-            cur.execute(
-                "DELETE FROM washer_cycles WHERE id = %s",
-                (cycle_id,),
-            )
+            (
+                _id,
+                machine_id,
+                machine_name,
+                env_id,
+                cycle_number,
+                started_at,
+                ended_at,
+                result,
+            ) = row
+
+            # Perform delete
+            cur.execute("DELETE FROM washer_cycles WHERE id = %s", (cycle_id,))
 
         conn.commit()
+
+        audit_success(
+            action="CYCLE_DELETED",
+            request=request,
+            env_id=int(env_id) if env_id is not None else 1,
+            user_id=None,
+            entity_type="cycle",
+            entity_id=cycle_id,
+            message="Cycle deleted",
+            extra={
+                "machine_id": machine_id,
+                "machine_name": machine_name,
+                "cycle_number": cycle_number,
+                "started_at": started_at.isoformat() if started_at else None,
+                "ended_at": ended_at.isoformat() if ended_at else None,
+                "result": result,
+            },
+        )
+
         return {"ok": True}
+
+    except HTTPException:
+        # Keep existing behaviour (raise through)
+        raise
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
+        audit_fail(
+            action="CYCLE_DELETE_FAILED",
+            request=request,
+            env_id=1,
+            user_id=None,
+            entity_type="cycle",
+            entity_id=cycle_id,
+            message="Failed to delete cycle",
+            extra={"error": str(e)},
+        )
+
+        raise HTTPException(status_code=500, detail=f"Failed to delete cycle: {e}")
     finally:
         conn.close()
 

@@ -1,12 +1,22 @@
+# app/api/v1/audit_logs_routes.py
+from __future__ import annotations
+
+from typing import Optional, Dict, Any
+
 from fastapi import APIRouter, Depends, Query
-from typing import Optional
 
+from app.core.auth import get_principal, get_env_id
 from app.db.audit_logs_repo import list_audit_logs
-from app.core.auth import get_current_user  # or whatever your project uses
 
-router = APIRouter(prefix="/v1/audit-logs", tags=["Audit Logs"])  # ✅ IMPORTANT
+router = APIRouter(prefix="/v1/audit-logs", tags=["Audit Logs"])
 
-@router.get("")
+
+@router.get("/_ping", summary="Audit logs ping (diagnostic)")
+def ping_audit_logs():
+    return {"ok": True, "route": "/v1/audit-logs"}
+
+
+@router.get("", summary="List audit logs (paged)")
 def get_audit_logs(
     q: Optional[str] = Query(None),
     user: Optional[str] = Query(None),
@@ -17,10 +27,11 @@ def get_audit_logs(
     to: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(25, ge=1, le=200),
-    current_user=Depends(get_current_user),
+    # ✅ Ensure request is authenticated and tenant-scoped the same way as the rest of the API
+    principal: Dict[str, Any] = Depends(get_principal),
+    env_id: int = Depends(get_env_id),
 ):
-    # env_id resolution here...
-    env_id = getattr(current_user, "environment_id", 1)
+    # env_id is authoritative for tenant filtering
     return list_audit_logs(
         env_id,
         q=q,

@@ -5,9 +5,10 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status, Request
 
 from app.core.auth import get_principal
+from app.core.audit import audit_success, audit_fail
 from app.db.connection import get_db_connection
 from app.db.maintenance_repo import (
     list_maintenance_logs as repo_list_maintenance_logs,
@@ -128,6 +129,7 @@ def list_maintenance_logs(
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_maintenance_log(
+    request: Request,
     body: Dict[str, Any] = Body(...),
     principal: Dict[str, Any] = Depends(get_principal),
     conn=Depends(get_db_connection),
@@ -146,7 +148,20 @@ def create_maintenance_log(
     env_id = int(principal["env_id"])
     user_id = int(principal["user_id"])
 
-    data = _validate_create_payload(body)
+    # Validate input (this can raise HTTPException 400)
+    try:
+        data = _validate_create_payload(body)
+    except HTTPException as he:
+        audit_fail(
+            action="MAINTENANCE_CREATE_FAILED",
+            request=request,
+            env_id=env_id,
+            user_id=user_id,
+            entity_type="maintenance",
+            message=str(he.detail),
+            extra={"payload": body, "reason": "validation_error"},
+        )
+        raise
 
     try:
         created = repo_create_maintenance_log(
@@ -160,6 +175,27 @@ def create_maintenance_log(
             notes=data["notes"],
         )
         conn.commit()
+
+        # Try to capture the created UUID/id returned from repo
+        created_id = None
+        if isinstance(created, dict):
+            created_id = created.get("id") or created.get("log_id")
+
+        audit_success(
+            action="MAINTENANCE_CREATED",
+            request=request,
+            env_id=env_id,
+            user_id=user_id,
+            entity_type="maintenance",
+            entity_id=created_id,
+            message="Maintenance log created",
+            extra={
+                "payload": body,
+                "machine_id": data["machine_id"],
+                "reason": data["reason"],
+            },
+        )
+
         return created
 
     except ValueError as ve:
@@ -168,13 +204,35 @@ def create_maintenance_log(
             conn.rollback()
         except Exception:
             pass
+
+        audit_fail(
+            action="MAINTENANCE_CREATE_FAILED",
+            request=request,
+            env_id=env_id,
+            user_id=user_id,
+            entity_type="maintenance",
+            message=str(ve),
+            extra={"payload": body, "reason": "repo_value_error"},
+        )
+
         raise HTTPException(status_code=404, detail=str(ve))
 
-    except HTTPException:
+    except HTTPException as he:
         try:
             conn.rollback()
         except Exception:
             pass
+
+        audit_fail(
+            action="MAINTENANCE_CREATE_FAILED",
+            request=request,
+            env_id=env_id,
+            user_id=user_id,
+            entity_type="maintenance",
+            message=str(he.detail),
+            extra={"payload": body, "reason": "http_exception"},
+        )
+
         raise
 
     except Exception as e:
@@ -182,6 +240,17 @@ def create_maintenance_log(
             conn.rollback()
         except Exception:
             pass
+
+        audit_fail(
+            action="MAINTENANCE_CREATE_FAILED",
+            request=request,
+            env_id=env_id,
+            user_id=user_id,
+            entity_type="maintenance",
+            message="Failed to create maintenance log",
+            extra={"payload": body, "error": str(e), "reason": "exception"},
+        )
+
         raise HTTPException(status_code=500, detail=f"Failed to create maintenance log: {e}")
 
     finally:
@@ -194,6 +263,7 @@ def create_maintenance_log(
 @router.delete("/{log_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_maintenance_log(
     log_id: str,
+    request: Request,
     principal: Dict[str, Any] = Depends(get_principal),
     conn=Depends(get_db_connection),
 ) -> Response:
@@ -212,6 +282,15 @@ def delete_maintenance_log(
     try:
         row = repo_get_maintenance_log_owner(conn, env_id=env_id, log_id=log_uuid)
         if not row:
+            audit_fail(
+                action="MAINTENANCE_DELETE_NOT_FOUND",
+                request=request,
+                env_id=env_id,
+                user_id=user_id,
+                entity_type="maintenance",
+                entity_id=str(log_uuid),
+                message="Maintenance log not found",
+            )
             raise HTTPException(status_code=404, detail="Maintenance log not found")
 
         created_by = row.get("created_by")
@@ -219,13 +298,47 @@ def delete_maintenance_log(
         # Simple auth rule
         if role != "Admin":
             if created_by is None or int(created_by) != user_id:
+                audit_fail(
+                    action="MAINTENANCE_DELETE_DENIED",
+                    request=request,
+                    env_id=env_id,
+                    user_id=user_id,
+                    entity_type="maintenance",
+                    entity_id=str(log_uuid),
+                    message="Not permitted to delete this entry",
+                    extra={"role": role, "created_by": created_by},
+                )
                 raise HTTPException(status_code=403, detail="Not permitted to delete this entry")
 
         deleted_count = repo_delete_maintenance_log(conn, env_id=env_id, log_id=log_uuid)
         if deleted_count == 0:
+            audit_fail(
+                action="MAINTENANCE_DELETE_NOT_FOUND",
+                request=request,
+                env_id=env_id,
+                user_id=user_id,
+                entity_type="maintenance",
+                entity_id=str(log_uuid),
+                message="Maintenance log not found",
+            )
             raise HTTPException(status_code=404, detail="Maintenance log not found")
 
         conn.commit()
+
+        audit_success(
+            action="MAINTENANCE_DELETED",
+            request=request,
+            env_id=env_id,
+            user_id=user_id,
+            entity_type="maintenance",
+            entity_id=str(log_uuid),
+            message="Maintenance log deleted",
+            extra={
+                "machine_id": row.get("machine_id"),
+                "reason": row.get("reason"),
+            },
+        )
+
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     except HTTPException:
@@ -240,6 +353,18 @@ def delete_maintenance_log(
             conn.rollback()
         except Exception:
             pass
+
+        audit_fail(
+            action="MAINTENANCE_DELETE_FAILED",
+            request=request,
+            env_id=env_id,
+            user_id=user_id,
+            entity_type="maintenance",
+            entity_id=str(log_uuid),
+            message="Failed to delete maintenance log",
+            extra={"error": str(e), "reason": "exception"},
+        )
+
         raise HTTPException(status_code=500, detail=f"Failed to delete maintenance log: {e}")
 
     finally:

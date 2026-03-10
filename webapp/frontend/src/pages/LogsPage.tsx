@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import AuditDetails from "../components/AuditDetails";
 import { getApiErrorMessage, listAuditLogs, type AuditLog } from "../lib/api";
 
 /**
@@ -26,26 +27,6 @@ function toDateInputValue(iso: string) {
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
-}
-
-function safeJsonStringify(value: any) {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function buildQuery(params: Record<string, string | number | undefined | null>) {
-  const sp = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) {
-    if (v === undefined || v === null) continue;
-    const s = String(v).trim();
-    if (!s) continue;
-    sp.set(k, s);
-  }
-  const qs = sp.toString();
-  return qs ? `?${qs}` : "";
 }
 
 /**
@@ -90,28 +71,6 @@ export default function LogsPage() {
     if (total === null) return null;
     return Math.max(1, Math.ceil(total / pageSize));
   }, [total, pageSize]);
-
-  /**
-   * For display/debug only (not used for HTTP anymore).
-   * Your actual requests go via axios baseURL "/api" (or VITE_API_BASE_URL).
-   */
-  const endpointUrl = useMemo(() => {
-    const LOGS_ENDPOINT = "/api/v1/audit-logs";
-    return (
-      LOGS_ENDPOINT +
-      buildQuery({
-        q,
-        user,
-        action,
-        entity_type: entityType,
-        entity_id: entityId,
-        from: fromDate,
-        to: toDate,
-        page,
-        limit: pageSize,
-      })
-    );
-  }, [q, user, action, entityType, entityId, fromDate, toDate, page, pageSize]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -324,9 +283,7 @@ export default function LogsPage() {
           </div>
         </div>
 
-        <div style={{ marginTop: 10, ...styles.muted }}>
-          Endpoint: <code>{endpointUrl}</code>
-        </div>
+        {/* Endpoint hidden for production UX */}
       </div>
 
       {/* TABLE */}
@@ -373,15 +330,11 @@ export default function LogsPage() {
                   const userLabel =
                     it.user_email ||
                     it.user_name ||
-                    (it.user_id !== undefined && it.user_id !== null
-                      ? `User#${it.user_id}`
-                      : "Unknown");
+                    (it.user_id !== undefined && it.user_id !== null ? `User#${it.user_id}` : "Unknown");
 
                   const entityLabel = it.entity_type
                     ? `${it.entity_type}${
-                        it.entity_id !== undefined && it.entity_id !== null
-                          ? `#${it.entity_id}`
-                          : ""
+                        it.entity_id !== undefined && it.entity_id !== null ? `#${it.entity_id}` : ""
                       }`
                     : it.entity_id !== undefined && it.entity_id !== null
                     ? `#${it.entity_id}`
@@ -422,16 +375,7 @@ export default function LogsPage() {
                         <tr>
                           <td style={styles.detailsCell} colSpan={6}>
                             <div style={styles.detailsBox}>
-                              <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                                <strong>Details</strong>
-                                <button
-                                  onClick={() => copyToClipboard(safeJsonStringify(it.details))}
-                                  style={styles.smallButton}
-                                >
-                                  Copy JSON
-                                </button>
-                              </div>
-                              <pre style={styles.pre}>{safeJsonStringify(it.details)}</pre>
+                              <AuditDetails details={it.details} action={it.action} />
                             </div>
                           </td>
                         </tr>
@@ -484,21 +428,6 @@ export default function LogsPage() {
 function truncate(s: string, max: number) {
   if (s.length <= max) return s;
   return s.slice(0, max - 1) + "…";
-}
-
-async function copyToClipboard(text: string) {
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch {
-    const el = document.createElement("textarea");
-    el.value = text;
-    el.style.position = "fixed";
-    el.style.left = "-9999px";
-    document.body.appendChild(el);
-    el.select();
-    document.execCommand("copy");
-    document.body.removeChild(el);
-  }
 }
 
 /**
@@ -681,16 +610,6 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 10,
     padding: 12,
     background: "var(--bs-body-bg)",
-    color: "var(--bs-body-color)",
-  },
-  pre: {
-    marginTop: 10,
-    background: "var(--bs-tertiary-bg)",
-    padding: 12,
-    borderRadius: 8,
-    overflowX: "auto",
-    border: "1px solid var(--bs-border-color)",
-    fontSize: 12,
     color: "var(--bs-body-color)",
   },
 
