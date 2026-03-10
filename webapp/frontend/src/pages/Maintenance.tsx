@@ -470,7 +470,7 @@ export default function Maintenance() {
           </div>
 
           <div className="px-3 py-2 border-top text-secondary small">
-            Future: link entries directly from a machine’s Details page and include “parts used” and “engineer”.
+            Tip: You can see the maintenance entried assigned to a machine from within the machines details.
           </div>
         </div>
       </div>
