@@ -1,350 +1,426 @@
-
 // src/pages/home.tsx
 import React from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink } from "react-router-dom";
+import { useAuth } from "../features/auth/AuthContext";
+import { useModules } from "../features/modules/ModulesContext";
+import {
+  api,
+  getApiErrorMessage,
+  getEnvironment,
+  getMe,
+  listAuditLogs,
+  listMachines,
+  listWasherCycles,
+  type AuditLog,
+  type Machine,
+  type WasherCycle,
+} from "../lib/api";
 
-/** Dev: http://localhost:8000 ; Prod: /api behind Nginx */
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+type HealthResponse = { ok: boolean; time?: string; message?: string };
 
-/* ---------------------------- Types ---------------------------- */
-type MeResponse = {
-  name: string;
-  first_name?: string | null; // <-- NEW
-  last_name?: string | null;  // <-- NEW
-  roles: string[];
-  environment_id: number;
+type Kpi = {
+  totalDevices: number | null;
+  activeDevices: number | null;
+  faults: number | null;
+  lastCycleAt?: string | null;
 };
 
-type EnvironmentResponse = {
-  id: number;
-  name: string;
-  domain: string;
-};
-
-type HealthResponse = {
-  ok: boolean;
-  time?: string;
-};
-
-type WashersSummary = {
-  sites: number;
-  devices: number;
-  active: number;
-  running: number;
-  faults: number;
-  lastImport?: string;
-};
-
-interface HomeProps {
-  /** If you already keep the token in context, you can pass it here. Otherwise it’s read from storage. */
-  token?: string;
-}
-
-/* ----------------------- Token utilities ----------------------- */
-function getTokenFromStorage(): string | null {
-  return (
-    sessionStorage.getItem("bp_token") ||
-    localStorage.getItem("bp_token") ||
-    null
-  );
-}
-
-/* ----------------------- Name utilities ------------------------ */
-function firstNameFromFullName(full?: string | null): string {
-  const s = (full ?? "").trim();
-  if (!s) return "there";
-  // Handle common formats like "Last, First", "First Last", "First Middle Last"
-  if (s.includes(",")) {
-    // "Last, First [Middle]" => take the first part after comma
-    const parts = s.split(",").map((p) => p.trim()).filter(Boolean);
-    if (parts.length > 1) {
-      const given = parts[1].split(/\s+/)[0];
-      return given || "there";
-    }
+function firstNameFromUser(me: any): string {
+  const f = String(me?.first_name ?? me?.firstName ?? "").trim();
+  if (f) return f;
+  const name = String(me?.name ?? me?.username ?? "").trim();
+  if (!name) return "there";
+  if (name.includes(",")) {
+    const parts = name
+      .split(",")
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (parts.length > 1) return parts[1].split(/\s+/)[0] || "there";
   }
-  // Default: first token
-  const given = s.split(/\s+/)[0];
-  return given || "there";
+  return name.split(/\s+/)[0] || "there";
 }
 
-/* -------------------------- Component -------------------------- */
-const Home: React.FC<HomeProps> = ({ token }) => {
-  const navigate = useNavigate();
+function isAdminFromUser(user: any): boolean {
+  if (!user) return false;
+  if (Array.isArray(user.roles)) {
+    return user.roles.map((r: any) => String(r).toLowerCase()).includes("admin");
+  }
+  const role = String(user.role ?? user.user_role ?? user.userRole ?? "").toLowerCase();
+  return role === "admin";
+}
 
-  const [user, setUser] = React.useState<MeResponse | null>(null);
-  const [env, setEnv] = React.useState<EnvironmentResponse | null>(null);
+function formatWhen(iso?: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? String(iso) : d.toLocaleString();
+}
+
+function badgeClass(ok: boolean | null): string {
+  if (ok === true) return "badge text-bg-success";
+  if (ok === false) return "badge text-bg-danger";
+  return "badge text-bg-secondary";
+}
+
+export default function Home() {
+  const { user: authUser } = useAuth();
+  const { environment, isEnabled, loading: modulesLoading } = useModules();
+
+  const isAdmin = isAdminFromUser(authUser);
+
+  const [me, setMe] = React.useState<any>(authUser ?? null);
+  const [env, setEnv] = React.useState<any>(environment ?? null);
   const [health, setHealth] = React.useState<HealthResponse | null>(null);
-  const [washers, setWashers] = React.useState<WashersSummary | null>(null);
 
+  const [kpi, setKpi] = React.useState<Kpi>({
+    totalDevices: null,
+    activeDevices: null,
+    faults: null,
+    lastCycleAt: null,
+  });
+
+  const [recent, setRecent] = React.useState<AuditLog[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
+  const showMachineMonitoring = isEnabled("machine-monitoring");
+  const showIntegrationHub = isEnabled("integration-hub");
+  const showAnalytics = isEnabled("analytics");
+  const showFinance = isEnabled("finance");
+
   React.useEffect(() => {
-    const abort = new AbortController();
+    let cancelled = false;
 
     async function load() {
+      setLoading(true);
+      setError(null);
+
       try {
-        setLoading(true);
-        setError(null);
-
-        const jwt = token ?? getTokenFromStorage();
-        if (!jwt) {
-          // No token → go to login
-          navigate("/login");
-          return;
-        }
-        const headers = { Authorization: `Bearer ${jwt}` };
-
-        // ---- /me
-        const meRes = await fetch(`${API_BASE}/me`, {
-          method: "GET",
-          headers,
-          signal: abort.signal,
-        });
-
-        if (meRes.status === 401) {
-          // Token invalid/expired → clear and redirect
-          sessionStorage.removeItem("bp_token");
-          localStorage.removeItem("bp_token");
-          navigate("/login");
-          return;
-        }
-        if (!meRes.ok) {
-          throw new Error(`Failed to load /me (${meRes.status})`);
-        }
-        const meData: MeResponse = await meRes.json();
-        setUser(meData);
-
-        // ---- /environment (optional badge)
-        const envRes = await fetch(`${API_BASE}/environment`, {
-          method: "GET",
-          headers,
-          signal: abort.signal,
-        });
-        if (envRes.ok) {
-          const envData: EnvironmentResponse = await envRes.json();
-          setEnv(envData);
+        // 1) Health (always safe)
+        try {
+          const res = await api.get<HealthResponse>("/health");
+          if (!cancelled) setHealth(res.data);
+        } catch (e) {
+          if (!cancelled) setHealth({ ok: false, message: getApiErrorMessage(e) });
         }
 
-        // ---- /health (API health)
-        const healthRes = await fetch(`${API_BASE}/health`, {
-          method: "GET",
-          signal: abort.signal,
-        });
-        if (healthRes.ok) {
-          const healthData: HealthResponse = await healthRes.json();
-          setHealth(healthData);
+        // 2) Profile + environment (prefer context, but refresh from API)
+        const [meData, envData] = await Promise.all([
+          getMe().catch(() => null),
+          getEnvironment().catch(() => null),
+        ]);
+
+        if (!cancelled) {
+          if (meData) setMe(meData);
+          if (envData) setEnv(envData);
         }
 
-        // ---- Washer integrations (placeholder for now)
-        // In future, replace this with a real endpoint like:
-        // const washersRes = await fetch(`${API_BASE}/devices/reprocessing/summary`, { headers });
-        // const washersData: WashersSummary = await washersRes.json();
-        // setWashers(washersData);
-        setWashers({
-          sites: 3,
-          devices: 7,
-          active: 6,
-          running: 3,
-          faults: 1,
-          lastImport: new Date().toISOString(),
-        });
+        // 3) Module KPIs (only for machine monitoring for now)
+        if (showMachineMonitoring) {
+          const [machines, cycles] = await Promise.all([
+            listMachines().catch(() => [] as Machine[]),
+            listWasherCycles().catch(() => [] as WasherCycle[]),
+          ]);
+
+          const totalDevices = machines.length;
+          const activeDevices = machines.filter((m: any) => (m as any).is_active !== false).length;
+
+          // Faults: count cycles where result === false (simple, high-level)
+          const faults = cycles.filter((c: any) => c?.result === false).length;
+
+          // Last cycle timestamp (prefer ended_at then started_at)
+          const lastCycleAt =
+            cycles
+              .map((c: any) => c?.ended_at ?? c?.started_at)
+              .filter(Boolean)
+              .map((s: any) => String(s))
+              .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] ?? null;
+
+          if (!cancelled) {
+            setKpi({ totalDevices, activeDevices, faults, lastCycleAt });
+          }
+        } else {
+          if (!cancelled) {
+            setKpi({ totalDevices: null, activeDevices: null, faults: null, lastCycleAt: null });
+          }
+        }
+
+        // 4) Recent notifications (Admin only): use audit logs as “recent activity”
+        if (isAdmin) {
+          try {
+            const page = await listAuditLogs({ page: 1, limit: 5 });
+            if (!cancelled) setRecent(page.items ?? []);
+          } catch {
+            if (!cancelled) setRecent([]);
+          }
+        } else {
+          if (!cancelled) setRecent([]);
+        }
       } catch (e: any) {
-        if (e?.name !== "AbortError") {
-          setError(e?.message ?? "Something went wrong");
-        }
+        if (!cancelled) setError(getApiErrorMessage(e) || "Failed to load home page.");
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
 
-    load();
-    return () => abort.abort();
-  }, [token, navigate]);
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [showMachineMonitoring, isAdmin]);
 
-  // Prefer first_name when provided; else fall back to first token from 'name'
-  const firstName =
-    (user?.first_name && user.first_name.trim()) || firstNameFromFullName(user?.name);
+  const firstName = firstNameFromUser(me);
+
+  const modulesInstalled = React.useMemo(() => {
+    const list: { key: string; name: string; enabled: boolean; to?: string }[] = [
+      { key: "machine-monitoring", name: "Machine Monitoring", enabled: showMachineMonitoring, to: "/machines/dashboard" },
+      { key: "integration-hub", name: "Integration Hub", enabled: showIntegrationHub, to: "/pipelines" },
+      { key: "analytics", name: "Analytics", enabled: showAnalytics, to: "/dashboards" },
+      { key: "finance", name: "Finance", enabled: showFinance, to: "/finance" },
+    ];
+    return list;
+  }, [showMachineMonitoring, showIntegrationHub, showAnalytics, showFinance]);
 
   return (
-    <div className="home-v2 container-fluid">
-      {/* Hero band */}
-      <section className="hero mt-3 p-3 p-sm-4 rounded-4">
+    <div className="container-xxl py-3">
+      {/* HERO */}
+      <section className="p-3 p-sm-4 rounded-4 border bg-body mb-3">
         <div className="d-flex align-items-center gap-3 flex-wrap">
-          {/* Logo from /public/images */}
           <img
             src="/images/bridgepointAlt.png"
             alt="BridgePoint"
-            className="hero-logo"
-            style={{ width: 48, height: 48 }}
+            style={{ width: 52, height: 52 }}
           />
           <div>
-            {/* Welcome with first name */}
             <h1 className="h4 mb-1">Welcome, {firstName}</h1>
-            <p className="mb-0 text-secondary">
-              Secure integration platform for sterile services — connect,
-              orchestrate, and surface insights.
-            </p>
-          </div>
-          {env && (
-            <div className="ms-auto">
-              <span className="badge bg-light text-dark border">
-                {env.name} · {env.domain}
-              </span>
+            <div className="text-secondary">
+              Your operational hub for machine monitoring, integrations and compliance.
             </div>
-          )}
+          </div>
+
+          <div className="ms-auto d-flex align-items-center gap-2 flex-wrap">
+            <span className={badgeClass(health?.ok ?? null)}>
+              {health?.ok ? "API Healthy" : "API Unhealthy"}
+            </span>
+
+            <span className="badge text-bg-secondary">
+              {modulesLoading ? "Loading environment…" : (env?.name ?? environment?.name ?? "Environment")}
+            </span>
+
+            <NavLink to="/settings" className="btn btn-sm btn-outline-secondary">
+              <i className="bi bi-gear me-1" aria-hidden="true" />
+              Settings
+            </NavLink>
+
+            <NavLink to="/help" className="btn btn-sm btn-outline-secondary">
+              <i className="bi bi-question-circle me-1" aria-hidden="true" />
+              Help
+            </NavLink>
+          </div>
         </div>
       </section>
 
-      {/* Loading / errors */}
       {loading && (
-        <div className="alert alert-info mt-3" role="status" aria-live="polite">
-          Loading your profile…
+        <div className="alert alert-info" role="status" aria-live="polite">
+          Loading your workspace…
         </div>
       )}
+
       {error && (
-        <div className="alert alert-danger mt-3" role="alert">
+        <div className="alert alert-warning" role="alert">
           {error}
         </div>
       )}
 
-      {/* Main content (only when not loading/error) */}
       {!loading && !error && (
         <>
-          {/* System status row */}
-          <section className="mt-3" aria-label="System status and profile">
-            <div className="row g-3">
+          {/* MODULES INSTALLED */}
+          <section className="card mb-3">
+            <div className="card-header d-flex align-items-center justify-content-between">
+              <div className="d-flex align-items-center gap-2">
+                <i className="bi bi-grid" aria-hidden="true" />
+                <strong>Modules installed</strong>
+              </div>
+              <span className="text-muted small">
+                Enabled features for {env?.name ?? environment?.name ?? "this environment"}
+              </span>
+            </div>
+            <div className="card-body">
+              <div className="row g-3">
+                {modulesInstalled.map((m) => (
+                  <div className="col-sm-6 col-lg-3" key={m.key}>
+                    <div className="p-3 border rounded h-100 d-flex flex-column">
+                      <div className="d-flex align-items-center justify-content-between">
+                        <div className="fw-semibold">{m.name}</div>
+                        <span className={`badge ${m.enabled ? "text-bg-success" : "text-bg-secondary"}`}>
+                          {m.enabled ? "Enabled" : "Disabled"}
+                        </span>
+                      </div>
+                      <div className="text-secondary small mt-2 flex-grow-1">
+                        {m.key === "machine-monitoring" && "Washers, telemetry, uploads, cycle history."}
+                        {m.key === "integration-hub" && "Pipelines and connectors for integrations."}
+                        {m.key === "analytics" && "Dashboards and insights."}
+                        {m.key === "finance" && "Billing and chargebacks."}
+                      </div>
+                      {m.enabled && m.to ? (
+                        <NavLink to={m.to} className="btn btn-sm btn-outline-primary mt-3">
+                          Open <i className="bi bi-arrow-right ms-1" aria-hidden="true" />
+                        </NavLink>
+                      ) : (
+                        <button className="btn btn-sm btn-outline-secondary mt-3" disabled>
+                          Not available
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          {/* KPI ROW (Machine Monitoring only for now) */}
+          {showMachineMonitoring && (
+            <section className="row g-3 mb-3" aria-label="High level KPIs">
               <div className="col-sm-6 col-xl-3">
-                <StatusCard
-                  title="API Health"
-                  icon="bi-heart-pulse"
-                  status={health?.ok ? "Healthy" : "Offline"}
-                  tone={health?.ok ? "success" : "danger"}
-                  note={health?.time ? new Date(health.time).toLocaleString() : undefined}
+                <KpiCard
+                  title="Total devices"
+                  icon="bi-hdd-stack"
+                  value={kpi.totalDevices}
+                  tone="secondary"
+                  foot="All registered machines"
                 />
               </div>
+
               <div className="col-sm-6 col-xl-3">
-                <StatusCard
-                  title="Profile"
-                  icon="bi-person-check"
-                  status={firstName}
+                <KpiCard
+                  title="Active devices"
+                  icon="bi-check-circle"
+                  value={kpi.activeDevices}
+                  tone="success"
+                  foot="Currently enabled"
+                />
+              </div>
+
+              <div className="col-sm-6 col-xl-3">
+                <KpiCard
+                  title="Fault cycles"
+                  icon="bi-x-octagon"
+                  value={kpi.faults}
+                  tone="danger"
+                  foot="Total cycles with FAIL result"
+                />
+              </div>
+
+              <div className="col-sm-6 col-xl-3">
+                {/* ✅ FIX: KpiCard.value is number|null; use displayValue for text */}
+                <KpiCard
+                  title="Last cycle"
+                  icon="bi-clock-history"
+                  value={null}
                   tone="primary"
-                  note={user?.roles?.length ? user.roles.join(", ") : "—"}
+                  foot={kpi.lastCycleAt ? formatWhen(kpi.lastCycleAt) : "—"}
+                  displayValue={kpi.lastCycleAt ? "Latest" : "—"}
                 />
               </div>
-              <div className="col-sm-6 col-xl-3">
-                <StatusCard title="Pipelines (24h)" icon="bi-diagram-3" status="—" tone="secondary" />
-              </div>
-              <div className="col-sm-6 col-xl-3">
-                <StatusCard title="Connectors Down" icon="bi-plug" status="—" tone="secondary" />
-              </div>
-            </div>
+            </section>
+          )}
+
+          {/* QUICK LINKS */}
+          <section className="row g-3 mb-3" aria-label="Quick links">
+            <QuickLink
+              title="Settings"
+              icon="bi-gear"
+              to="/settings"
+              copy="Manage your profile, users and modules."
+            />
+            <QuickLink
+              title="Help"
+              icon="bi-question-circle"
+              to="/help"
+              copy="Guides, troubleshooting and contact."
+            />
+            {showMachineMonitoring && (
+              <QuickLink
+                title="Machine Dashboard"
+                icon="bi-graph-up"
+                to="/machines/dashboard"
+                copy="Detailed analytics for washer cycles."
+              />
+            )}
+            {showMachineMonitoring && (
+              <QuickLink
+                title="Machines"
+                icon="bi-hdd-stack"
+                to="/machines"
+                copy="View and manage devices."
+              />
+            )}
           </section>
 
-          {/* Washer Integrations — placeholder summary */}
-          <section className="mt-4" aria-label="Washer integrations">
-            <div className="card">
-              <div className="card-header d-flex align-items-center justify-content-between">
-                <div className="d-flex align-items-center gap-2">
-                  <i className="bi bi-droplet" aria-hidden="true" />
-                  <strong>Washer Integrations</strong>
+          {/* ABOUT + NOTIFICATIONS */}
+          <section className="row g-3">
+            <div className="col-xl-7">
+              <div className="card h-100">
+                <div className="card-header d-flex align-items-center gap-2">
+                  <i className="bi bi-info-circle" aria-hidden="true" />
+                  <strong>About BridgePoint</strong>
                 </div>
-                <div className="d-flex align-items-center gap-2">
-                  {washers?.lastImport && (
-                    <span className="text-muted small">
-                      Last import: {new Date(washers.lastImport).toLocaleString()}
-                    </span>
+                <div className="card-body">
+                  <p className="mb-2">
+                    BridgePoint provides a cloud-first operational layer for sterile services:
+                    monitoring, integrations, and audit-ready workflows — designed to scale across sites.
+                  </p>
+                  <ul className="text-secondary small mb-0">
+                    <li>Tenant-scoped access control</li>
+                    <li>Audit logging and traceability</li>
+                    <li>Containerised deployment for portability</li>
+                    <li>AI-ready architecture (future modules)</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <div className="col-xl-5">
+              <div className="card h-100">
+                <div className="card-header d-flex align-items-center justify-content-between">
+                  <div className="d-flex align-items-center gap-2">
+                    <i className="bi bi-bell" aria-hidden="true" />
+                    <strong>Recent notifications</strong>
+                  </div>
+
+                  {isAdmin ? (
+                    <NavLink to="/logs" className="btn btn-sm btn-outline-secondary">
+                      View logs
+                    </NavLink>
+                  ) : (
+                    <span className="text-muted small">Admin-only</span>
                   )}
-                  <NavLink to="/washers" className="btn btn-sm btn-outline-primary">
-                    <i className="bi bi-arrow-right" aria-hidden="true" /> Open Washers
-                  </NavLink>
                 </div>
-              </div>
-              <div className="card-body">
-                {!washers ? (
-                  <div className="text-muted">No washer data available.</div>
-                ) : (
-                  <div className="row g-3">
-                    <div className="col-sm-6 col-lg-3">
-                      <StatusCard title="Sites" icon="bi-building" status={String(washers.sites)} tone="secondary" />
-                    </div>
-                    <div className="col-sm-6 col-lg-3">
-                      <StatusCard title="Devices" icon="bi-hdd-stack" status={String(washers.devices)} tone="secondary" />
-                    </div>
-                    <div className="col-sm-6 col-lg-3">
-                      <StatusCard title="Active" icon="bi-check-circle" status={String(washers.active)} tone="success" />
-                    </div>
-                    <div className="col-sm-6 col-lg-3">
-                      <StatusCard title="Running" icon="bi-play-fill" status={String(washers.running)} tone="primary" />
-                    </div>
-                    <div className="col-sm-6 col-lg-3">
-                      <StatusCard title="Faults" icon="bi-x-octagon" status={String(washers.faults)} tone="danger" />
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </section>
 
-          {/* Quick navigation tiles */}
-          <section aria-label="Quick navigation" className="mt-4">
-            <div className="row g-3">
-              <ActionCard
-                title="Pipelines"
-                icon="bi-diagram-3"
-                to="/pipelines"
-                copy="Orchestration health, retries, and lineage."
-              />
-              <ActionCard
-                title="Connectors"
-                icon="bi-plug"
-                to="/connectors"
-                copy="Device/API adapters and ETL collectors status."
-              />
-              <ActionCard
-                title="Alerts"
-                icon="bi-bell"
-                to="/alerts"
-                copy="Active warnings and system notifications."
-              />
-            </div>
-          </section>
-
-          {/* Activity & throughput placeholders */}
-          <section className="mt-4" aria-label="Status and activity">
-            <div className="row g-3">
-              <div className="col-xl-7">
-                <div className="card h-100">
-                  <div className="card-header">Pipeline Throughput (24h)</div>
-                  <div
-                    className="card-body border border-dashed"
-                    style={{ height: 240 }}
-                    aria-label="Chart placeholder"
-                  >
-                    {/* TODO: Replace with Chart.js or Power BI embed */}
-                    <span className="text-secondary">Coming soon: KPIs from Azure SQL / Power BI.</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="col-xl-5">
-                <div className="card h-100">
-                  <div className="card-header d-flex align-items-center gap-2">
-                    <i className="bi bi-activity" aria-hidden="true" /> Recent Activity
-                  </div>
-                  <div className="list-group list-group-flush">
-                    <ActivityItem
-                      icon="bi-arrow-repeat"
-                      tone="warning"
-                      text='ETL “WasherLogs-01” retrying (2 of 5)'
-                    />
-                    <ActivityItem icon="bi-plug" tone="danger" text='Connector “TDOC-AT” unreachable' />
-                    <ActivityItem
-                      icon="bi-check2-circle"
-                      tone="success"
-                      text='Orchestration job “FinanceSync” succeeded'
-                    />
-                  </div>
+                <div className="card-body p-0">
+                  {isAdmin ? (
+                    recent.length === 0 ? (
+                      <div className="p-3 text-muted">No recent events.</div>
+                    ) : (
+                      <div className="list-group list-group-flush">
+                        {recent.map((it) => (
+                          <div key={String(it.id)} className="list-group-item bg-transparent">
+                            <div className="d-flex justify-content-between gap-2">
+                              <div className="fw-semibold">{it.action}</div>
+                              <div className="text-muted small">{formatWhen(it.created_at)}</div>
+                            </div>
+                            <div className="text-secondary small">
+                              {it.user_email || it.user_name || (it.user_id ? `User#${it.user_id}` : "System")}
+                              {it.entity_type ? ` • ${it.entity_type}${it.entity_id != null ? `#${it.entity_id}` : ""}` : ""}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  ) : (
+                    <div className="p-3 text-muted">
+                      Notifications are available to administrators. Please contact your admin if you need access.
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -353,41 +429,42 @@ const Home: React.FC<HomeProps> = ({ token }) => {
       )}
     </div>
   );
-};
-
-export default Home;
+}
 
 /* ----------------------- Local components ---------------------- */
 
-function StatusCard({
+function KpiCard({
   title,
   icon,
-  status,
+  value,
   tone,
-  note,
+  foot,
+  displayValue,
 }: {
   title: string;
   icon: string;
-  status?: string;
-  tone?: "success" | "danger" | "primary" | "secondary";
-  note?: string;
+  value: number | null;
+  tone: "success" | "danger" | "primary" | "secondary";
+  foot?: string;
+  displayValue?: string;
 }) {
+  const shown = displayValue ?? (value == null ? "—" : String(value));
   return (
     <div className="card h-100">
       <div className="card-body">
         <div className="d-flex align-items-center justify-content-between">
-          <h6 className="card-title mb-0">{title}</h6>
+          <div className="text-muted small">{title}</div>
           <i className={`bi ${icon}`} aria-hidden="true" />
         </div>
-        <p className="display-6 my-2">{status ?? "—"}</p>
-        {note && <p className="text-secondary mb-0">{note}</p>}
-        {tone && <span className={`badge bg-${tone} mt-2`}>{tone}</span>}
+        <div className="display-6 my-2">{shown}</div>
+        {foot ? <div className="text-secondary small">{foot}</div> : null}
+        <span className={`badge bg-${tone} mt-2`}>{tone}</span>
       </div>
     </div>
   );
 }
 
-function ActionCard({
+function QuickLink({
   title,
   icon,
   to,
@@ -399,36 +476,19 @@ function ActionCard({
   copy: string;
 }) {
   return (
-    <div className="col-sm-6 col-lg-4">
+    <div className="col-sm-6 col-xl-3">
       <div className="card h-100">
         <div className="card-body">
           <div className="d-flex align-items-center justify-content-between">
-            <h6 className="card-title mb-0">{title}</h6>
+            <div className="fw-semibold">{title}</div>
             <i className={`bi ${icon}`} aria-hidden="true" />
           </div>
-          <p className="card-text mt-2">{copy}</p>
-          <NavLink to={to} className="stretched-link" aria-label={`Open ${title}`}>
-            Open
+          <div className="text-secondary small mt-2">{copy}</div>
+          <NavLink to={to} className="btn btn-sm btn-outline-primary mt-3">
+            Open <i className="bi bi-arrow-right ms-1" aria-hidden="true" />
           </NavLink>
         </div>
       </div>
-    </div>
-  );
-}
-
-function ActivityItem({
-  icon,
-  tone,
-  text,
-}: {
-  icon: string;
-  tone: "success" | "danger" | "warning" | "info";
-  text: string;
-}) {
-  return (
-    <div className="list-group-item bg-transparent">
-      <i className={`bi ${icon} me-2 text-${tone}`} aria-hidden="true" />
-      {text}
     </div>
   );
 }
