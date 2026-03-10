@@ -1,309 +1,589 @@
-// GM61 Autobridge Version 3.0001
-// ETL script for extracting washer data from a folder on site and sending it via an API
-/*
-This script monitors a specified folder for new XML files representing washer data.
-When a new file is detected, it uploads the file to a remote API with authentication.
+// GM61 AutoBridge Version 4.0000
+// Multi-location polling + global resend + multi-file upload (additionalFiles)
+//
+// Run (testing):
+// deno run --allow-read --allow-net --allow-env --allow-write --allow-run --unstable-kv AutoBridge.ts
+//
+// Compile (Mac):
+// deno compile --allow-read --allow-net --allow-env --allow-write --unstable-kv --allow-run --output washer-uploader AutoBridge.ts
+//
+// Compile (Windows):
+// deno compile --allow-read --allow-net --allow-env --allow-write --unstable-kv --allow-run --target x86_64-pc-windows-msvc --no-check --output GM61-AutoBridge.exe AutoBridge.ts
 
-Built in May 2025 by Nick LeMasonry, Head of Software & Data at GM61 Limited.
-
-RELEASE NOTES:
-- Version 2.0008: Added support for removing hashtags in serial numbers if configured.
-- Version 2.0007: Upgraded logging archive functionality to zip logs older than 7 days and remove them.
-- Version 2.0006: Added functionalitiy to retry failed uploads up to x times with exponential backoff, configured within ENV.
-- Version 2.0005: Added support for removing spaces in serial numbers if configured.
-- Version 2.0004: Added support for authentication token caching and expiry handling.
-- Version 2.0003: Upgraded logging functionality to track file processing and errors.
-
-
-*/
-// Command to start the script (testing): deno run --allow-read --allow-net --allow-env --allow-write --allow-run --unstable-kv AutoBridge.ts
-/*
-Compile on MAC: 
-deno compile --allow-read --allow-net --allow-env --allow-write --unstable-kv --allow-run --output washer-uploader AutoBridge.ts
-Command to compile on Windows:
-deno compile --allow-read --allow-net --allow-env --allow-write --unstable-kv --target x86_64-pc-windows-msvc --allow-run --no-check --output GM61-AutoBridge.exe AutoBridge.ts
-
-*/
-
-import { ensureDir, exists } from "https://deno.land/std/fs/mod.ts";
-import { join } from "https://deno.land/std/path/mod.ts";
 import "https://deno.land/std@0.224.0/dotenv/load.ts";
+import { ensureDir, exists } from "https://deno.land/std@0.224.0/fs/mod.ts";
+import { basename, extname, join } from "https://deno.land/std@0.224.0/path/mod.ts";
 
-const startDateStr = Deno.env.get("START_DATE"); // e.g. "2025-06-01"
-const startDate = startDateStr ? new Date(startDateStr) : null;
+type Mode = "root" | "subfolder";
+type WasherNameSource = "folder" | "filename" | "xml" | "fixed";
 
-const removeSpaces = Deno.env.get("REMOVE_SPACES")?.toLowerCase() === "true";
-const removeHashtags = Deno.env.get("REMOVE_HASHTAGS")?.toLowerCase() === "true";
+type GlobalConfig = {
+  pollIntervalSeconds: number;
+  startDate?: string;
+  removeSpaces: boolean;
+  removeHashtags: boolean;
+  maxRetries: number;
+  xmlTagDefault: string;
+  fileExtensions: string[];
+  resendFolder: string;
+  fileStabilityWaitMs?: number;
+};
 
-const maxRetries = parseInt(Deno.env.get("MAX_RETRIES") || "5");
+type WasherNameConfig =
+  | { source: "folder" }
+  | { source: "xml"; xmlTag?: string }
+  | { source: "filename"; regex?: string }
+  | { source: "fixed"; value: string };
 
-const useSubfolder = Deno.env.get("SUBFOLDER")?.toLowerCase() === "true";
-const isEndo = !useSubfolder;
+type MultiFileConfig = {
+  enabled: boolean;
+  groupKeyRegex?: string;      // extracts cycleKey (prefer named group (?<cycleKey>...))
+  requiredCount?: number;      // number of files required to upload as one unit
+  waitForGroupSeconds?: number;
+  primaryFileRegex?: string;   // which file becomes primary "file"
+};
 
-const xmlTag = Deno.env.get("XML_TAG") || "MACHNAME";
-const pollInterval = parseInt(Deno.env.get("POLL_INTERVAL") || "10") * 1000;
+type OnSuccessMoveConfig = {
+  enabled: boolean;
+  destination: string;
+};
 
-const moveFile = Deno.env.get("MOVE_FILE")?.toLowerCase() === "true";
-const moveFilePath = Deno.env.get("MOVE_FILE_PATH") || "";
+type LocationConfig = {
+  id: string;
+  watchFolder: string;
+  mode: Mode;
+  machineCode: string;
+  washerName: WasherNameConfig;
+  multiFile?: MultiFileConfig;
+  onSuccessMove?: OnSuccessMoveConfig;
+};
 
-// Ensure logs directory exists
-await ensureDir("logs");
+type AppConfig = {
+  global: GlobalConfig;
+  locations: LocationConfig[];
+};
 
-// Retrieve authentication details from environment variables
-const authUrl = Deno.env.get("AUTH_URL")!;
-const authUsername = Deno.env.get("AUTH_USERNAME")!;
-const authPassword = Deno.env.get("AUTH_PASSWORD")!;
+const CONFIG_PATH = Deno.env.get("CONFIG_PATH") || "./AutoBridge.config.json";
+const API_URL = Deno.env.get("API_URL")!;
+const AUTH_URL = Deno.env.get("AUTH_URL")!;
+const AUTH_USERNAME = Deno.env.get("AUTH_USERNAME")!;
+const AUTH_PASSWORD = Deno.env.get("AUTH_PASSWORD")!;
+const LOG_DIR = Deno.env.get("LOG_DIR") || "./logs";
 
-// Variables to cache the authentication token and its expiry time
+if (!API_URL || !AUTH_URL || !AUTH_USERNAME || !AUTH_PASSWORD) {
+  console.error("Missing required env vars: API_URL, AUTH_URL, AUTH_USERNAME, AUTH_PASSWORD");
+  Deno.exit(1);
+}
+
+await ensureDir(LOG_DIR);
+
+const db = await Deno.openKv(join(LOG_DIR, "processed_files.db"));
+
 let cachedToken: string | null = null;
 let tokenExpiry: number | null = null;
 
-/**
- * Writes a log message to a daily log file (one per day).
- * Cleans up log files older than 7 days.
- * @param message The message to log.
- */
 async function writeLog(message: string) {
   try {
-    const dateStr = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
-    const dailyLogPath = join("logs", `log_${dateStr}.log`);
+    const dateStr = new Date().toISOString().split("T")[0];
+    const dailyLogPath = join(LOG_DIR, `log_${dateStr}.log`);
     const timestamp = new Date().toISOString();
-    const logMessage = `[${timestamp}] ${message}\n`;
-    await Deno.writeTextFile(dailyLogPath, logMessage, { append: true });
-
-    // Clean up old log files (keep last 7 days)
-    for await (const entry of Deno.readDir("logs")) {
-      if (entry.isFile && entry.name.startsWith("log_") && entry.name.endsWith(".zip")) {
-        const logDateStr = entry.name.slice(4, 14); // extract date
-        const logDate = new Date(logDateStr);
-        const daysOld = (Date.now() - logDate.getTime()) / (1000 * 60 * 60 * 24);
-        if (daysOld > 7) {
-          await Deno.remove(join("logs", entry.name));
-          await writeLog(`Deleted old zipped log: ${entry.name}`);
-        }
-      }
-    }
-
-    // Zip yesterday's log file if it exists and hasn't been zipped
-    const yesterday = new Date(Date.now() - 86400000); // 24 * 60 * 60 * 1000
-    const yesterdayStr = yesterday.toISOString().split("T")[0];
-    const yesterdayLog = join("logs", `log_${yesterdayStr}.log`);
-    const zipPath = `${yesterdayLog}.zip`;
-
-    try {
-      const fileInfo = await Deno.stat(yesterdayLog);
-      if (fileInfo && !await exists(zipPath)) {
-        const zipCommand = new Deno.Command("zip", {
-          args: ["-j", zipPath, yesterdayLog],
-          stdout: "null",
-          stderr: "null",
-        });
-        await zipCommand.output();
-        await Deno.remove(yesterdayLog);
-        await writeLog(`Zipped: ${yesterdayLog}`);
-      }
-    } catch (_) {
-      // No action if file doesn't exist
-    }
+    await Deno.writeTextFile(dailyLogPath, `[${timestamp}] ${message}\n`, { append: true });
   } catch (err) {
     console.error("Logging failed:", err);
   }
 }
 
-// Folder path to watch for new files, specified via environment variable
-const folderPath = Deno.env.get("WATCH_FOLDER")!;
+function normalizeSerial(serial: string, removeSpaces: boolean, removeHashtags: boolean) {
+  let out = serial ?? "";
+  if (removeSpaces) out = out.replace(/\s+/g, "");
+  if (removeHashtags) out = out.replace(/#/g, "");
+  return out;
+}
 
-// Open or create a SQLite-style key-value store for tracking processed files
-const db = await Deno.openKv(join("logs", "processed_files.db"));
-
-/**
- * Sends a file to the remote API with appropriate authentication and metadata.
- * @param filepath The full path to the file to send.
- * @param subfolder The subfolder name, representing machine serial or washer identifier.
- * @returns A boolean indicating success or failure of the upload.
- */
-async function sendFile(filepath: string, subfolder: string | null) {
+async function isFileStable(path: string, waitMs: number): Promise<boolean> {
   try {
-    const fileContent = await Deno.readFile(filepath);
-    const filename = filepath.split(/[\\/]/).pop() || filepath;
-    const machineCode = Deno.env.get("MACHINE_CODE")!;
-    let serialValue = subfolder;
-
-    if (!useSubfolder) {
-      const xmlText = await Deno.readTextFile(filepath);
-      const machMatch = xmlText.match(new RegExp(`<${xmlTag}>(.*?)</${xmlTag}>`, "i"));
-      if (machMatch && machMatch[1]) {
-        serialValue = machMatch[1].trim();
-      } else {
-        await writeLog(`${xmlTag} not found in ${filepath}`);
-        serialValue = "UNKNOWN";
-      }
-    }
-
-    if (serialValue === null) {
-      serialValue = "";
-    }
-
-    if (removeSpaces) serialValue = serialValue.replace(/\s+/g, "");
-    if (removeHashtags) serialValue = serialValue.replace(/#/g, "");
-    const combinedMachineCode = `${machineCode}-${serialValue}`;
-    let attempt = 0;
-    let success = false;
-
-    while (attempt < maxRetries && !success) {
-      attempt++;
-      try {
-        const formData = new FormData();
-        formData.append("file", new Blob([fileContent]), filename);
-        formData.append("machineCode", combinedMachineCode);
-        formData.append("machineSerial", serialValue);
-
-        await writeLog(`Attempt ${attempt}: Uploading file ${filename} with machineCode: ${combinedMachineCode}`);
-
-        const now = Date.now();
-        if (!cachedToken || !tokenExpiry || now >= tokenExpiry) {
-          const authResponse = await fetch(authUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ username: authUsername, password: authPassword }),
-          });
-
-          if (!authResponse.ok) {
-            await writeLog(`Auth failed: ${authResponse.status} ${authResponse.statusText}`);
-            continue;
-          }
-
-          const authData = await authResponse.json();
-          cachedToken = `Bearer ${authData.data.access_token}`;
-          const decodedPayload = JSON.parse(atob(authData.data.access_token.split(".")[1]));
-          tokenExpiry = decodedPayload.exp * 1000;
-          await writeLog(`Auth successful. Token cached until ${new Date(tokenExpiry).toISOString()}`);
-        }
-
-        const response = await fetch(Deno.env.get("API_URL")!, {
-          method: "POST",
-          headers: {
-            "authorization": cachedToken,
-          },
-          body: formData,
-        });
-
-        const contentType = response.headers.get("content-type");
-        let responseBody: any;
-
-        if (contentType && contentType.includes("application/json")) {
-          responseBody = await response.json();
-        } else {
-          responseBody = await response.text();
-        }
-
-        if (!response.ok) {
-          await writeLog(`API Response: ${JSON.stringify({
-            statusCode: response.status,
-            message: responseBody.message || responseBody,
-          })}`);
-        } else {
-          success = true;
-        }
-      } catch (err) {
-        await writeLog(`Attempt ${attempt} failed with error: ${err}`);
-      }
-
-      if (!success && attempt < maxRetries) {
-        await new Promise((resolve) => setTimeout(resolve, 2000)); // wait 2s before retrying
-      }
-    }
-
-    const status = success ? "success" : "failed";
-    await writeLog(`File ${filename} from ${subfolder} processed: ${status}`);
-    // Move file if configured and upload was successful
-    if (success && moveFile && moveFilePath) {
-      try {
-        const destinationPath = join(moveFilePath, filename);
-        await ensureDir(moveFilePath);
-        await Deno.rename(filepath, destinationPath);
-        await writeLog(`Moved processed file ${filename} to ${destinationPath}`);
-      } catch (moveErr) {
-        await writeLog(`Failed to move file ${filename}: ${moveErr}`);
-      }
-    }
-    await db.set(["processed_files", filename], {
-      filename,
-      subfolder,
-      status,
-      timestamp: new Date().toISOString(),
-    });
-
-    console.log(`File ${filename} from ${subfolder} processed: ${status}`);
-    return success;
-  } catch (error) {
-    const filename = filepath.split(/[\\/]/).pop() || filepath;
-    console.error(`Error processing ${filename} from ${subfolder}: ${error}`);
-    await writeLog(`Error processing ${filename} from ${subfolder}: ${error}`);
-    await db.set(["processed_files", filename], {
-      filename,
-      subfolder,
-      status: "error",
-      timestamp: new Date().toISOString(),
-    });
+    const a = await Deno.stat(path);
+    await new Promise((r) => setTimeout(r, waitMs));
+    const b = await Deno.stat(path);
+    const aM = a.mtime?.getTime() ?? 0;
+    const bM = b.mtime?.getTime() ?? 0;
+    return a.size === b.size && aM === bM;
+  } catch {
     return false;
   }
 }
 
-/**
- * Continuously monitors the designated folder for new washer subfolders and XML files.
- * Processes any new files found by uploading them via the sendFile function.
- */
-async function processFolder() {
-  // Ensure the main folder to watch exists
-  await ensureDir(folderPath);
+async function safeMove(src: string, dest: string) {
+  const destDir = dest.substring(0, dest.lastIndexOf("/") > -1 ? dest.lastIndexOf("/") : dest.length);
+  if (destDir) await ensureDir(destDir);
 
-  // Infinite loop to keep watching the folder for changes
-  while (true) {
-    // Iterate over each subfolder (washer folder) in the main folder
-    for await (const washerFolder of Deno.readDir(folderPath)) {
-      if (useSubfolder && washerFolder.isDirectory) {
-        const washerPath = join(folderPath, washerFolder.name);
-
-        for await (const entry of Deno.readDir(washerPath)) {
-          if (entry.isFile && entry.name.toLowerCase().endsWith(".xml")) {
-            const fullPath = join(washerPath, entry.name);
-            const fileInfo = await Deno.stat(fullPath);
-            const fileCreatedDate = fileInfo.birthtime ?? fileInfo.mtime;
-            if (startDate && fileCreatedDate && fileCreatedDate < startDate) continue;
-
-            const filename = entry.name;
-            const existing = await db.get(["processed_files", filename]);
-            if (!existing.value) {
-              await writeLog(`Found new file: ${filename} in ${washerFolder.name}`);
-              await sendFile(fullPath, washerFolder.name);
-            }
-          }
-        }
-      } else if (!useSubfolder && washerFolder.isFile && washerFolder.name.toLowerCase().endsWith(".xml")) {
-        const fullPath = join(folderPath, washerFolder.name);
-        const fileInfo = await Deno.stat(fullPath);
-        const fileCreatedDate = fileInfo.birthtime ?? fileInfo.mtime;
-        if (startDate && fileCreatedDate && fileCreatedDate < startDate) continue;
-
-        const filename = washerFolder.name;
-        const existing = await db.get(["processed_files", filename]);
-        if (!existing.value) {
-          await writeLog(`Found new file: ${filename} in root folder`);
-          await sendFile(fullPath, null);
-        }
-      }
-    }
-
-    // Wait for pollInterval milliseconds before checking the folder again to reduce CPU usage
-    await new Promise((resolve) => setTimeout(resolve, pollInterval));
+  try {
+    await Deno.rename(src, dest);
+  } catch {
+    await Deno.copyFile(src, dest);
+    await Deno.remove(src);
   }
 }
 
-// Start the folder processing loop
-await processFolder();
+async function getAuthToken(): Promise<string | null> {
+  const now = Date.now();
+  if (cachedToken && tokenExpiry && now < tokenExpiry) return cachedToken;
 
-// Gracefully close the key-value store when the script is exiting
-addEventListener("unload", () => {
-  db.close();
-});
+  const resp = await fetch(AUTH_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: AUTH_USERNAME, password: AUTH_PASSWORD }),
+  });
+
+  if (!resp.ok) {
+    await writeLog(`Auth failed: ${resp.status} ${resp.statusText}`);
+    return null;
+  }
+
+  const data = await resp.json();
+  const accessToken = data?.data?.access_token;
+  if (!accessToken) {
+    await writeLog("Auth response missing data.access_token");
+    return null;
+  }
+
+  cachedToken = `Bearer ${accessToken}`;
+  const decodedPayload = JSON.parse(atob(accessToken.split(".")[1]));
+  tokenExpiry = decodedPayload.exp * 1000;
+
+  await writeLog(`Auth ok. Token cached until ${new Date(tokenExpiry).toISOString()}`);
+  return cachedToken;
+}
+
+async function extractWasherName(
+  loc: LocationConfig,
+  global: GlobalConfig,
+  filePath: string,
+  folderName: string | null,
+): Promise<string> {
+  const cfg = loc.washerName;
+
+  if (cfg.source === "fixed") return cfg.value;
+  if (cfg.source === "folder") return folderName ?? "UNKNOWN";
+
+  if (cfg.source === "filename") {
+    const fn = basename(filePath);
+    if (cfg.regex) {
+      const rx = new RegExp(cfg.regex);
+      const m = fn.match(rx);
+      if (m?.groups?.washer) return m.groups.washer;
+      if (m && m[1]) return m[1];
+    }
+    return fn.replace(extname(fn), "");
+  }
+
+  // xml
+  const tag = cfg.xmlTag || global.xmlTagDefault;
+  const xmlText = await Deno.readTextFile(filePath);
+  const machMatch = xmlText.match(new RegExp(`<${tag}>(.*?)</${tag}>`, "i"));
+  if (machMatch && machMatch[1]) return machMatch[1].trim();
+
+  await writeLog(`[${loc.id}] ${tag} not found in ${filePath}`);
+  return "UNKNOWN";
+}
+
+/**
+ * Encode resend filename so we can restore context:
+ *   <locId>__<washerName>__<originalFileName>
+ * We also return originalFileName for restoring on success.
+ */
+function encodeResendName(locId: string, washerName: string, originalFileName: string) {
+  const safeWasher = washerName.replace(/[^A-Za-z0-9._-]/g, "_");
+  return `${locId}__${safeWasher}__${originalFileName}`;
+}
+
+function tryParseResendName(fileName: string) {
+  // locId__washer__original
+  const parts = fileName.split("__");
+  if (parts.length < 3) return null;
+  const locId = parts[0];
+  const washer = parts[1];
+  const original = parts.slice(2).join("__"); // in case original had "__"
+  return { locId, washer, original };
+}
+
+type FileItem = { path: string; name: string; folderName: string | null };
+
+async function listCandidateFiles(loc: LocationConfig, global: GlobalConfig, rootPath: string): Promise<FileItem[]> {
+  const res: FileItem[] = [];
+  const startDate = global.startDate ? new Date(global.startDate) : null;
+  const exts = new Set(global.fileExtensions.map((e) => e.toLowerCase()));
+
+  if (loc.mode === "subfolder") {
+    for await (const f of Deno.readDir(rootPath)) {
+      if (!f.isDirectory) continue;
+      const washerFolder = f.name;
+      const washerPath = join(rootPath, washerFolder);
+
+      for await (const entry of Deno.readDir(washerPath)) {
+        if (!entry.isFile) continue;
+        const ext = extname(entry.name).toLowerCase();
+        if (!exts.has(ext)) continue;
+
+        const full = join(washerPath, entry.name);
+        const st = await Deno.stat(full);
+        const created = st.birthtime ?? st.mtime;
+        if (startDate && created && created < startDate) continue;
+
+        res.push({ path: full, name: entry.name, folderName: washerFolder });
+      }
+    }
+  } else {
+    for await (const entry of Deno.readDir(rootPath)) {
+      if (!entry.isFile) continue;
+      const ext = extname(entry.name).toLowerCase();
+      if (!exts.has(ext)) continue;
+
+      const full = join(rootPath, entry.name);
+      const st = await Deno.stat(full);
+      const created = st.birthtime ?? st.mtime;
+      if (startDate && created && created < startDate) continue;
+
+      res.push({ path: full, name: entry.name, folderName: null });
+    }
+  }
+
+  return res;
+}
+
+async function alreadyProcessed(locId: string, filePath: string): Promise<boolean> {
+  const key = ["processed_files", locId, filePath] as const;
+  const v = await db.get(key);
+  return !!v.value;
+}
+
+async function markProcessed(locId: string, filePath: string, status: string, extra?: Record<string, unknown>) {
+  const key = ["processed_files", locId, filePath] as const;
+  const st = await Deno.stat(filePath).catch(() => null);
+  await db.set(key, {
+    path: filePath,
+    status,
+    size: st?.size ?? null,
+    mtime: st?.mtime?.toISOString() ?? null,
+    timestamp: new Date().toISOString(),
+    ...extra,
+  });
+}
+
+function groupFilesIfEnabled(loc: LocationConfig, files: FileItem[]) {
+  const mf = loc.multiFile;
+  if (!mf?.enabled || !mf.groupKeyRegex) {
+    return { groups: files.map((f) => ({ key: f.name, items: [f] })), pending: [] as string[] };
+  }
+
+  const rx = new RegExp(mf.groupKeyRegex, "i");
+  const required = mf.requiredCount ?? 2;
+
+  const map = new Map<string, FileItem[]>();
+  for (const f of files) {
+    const m = f.name.match(rx);
+    const key = m?.groups?.cycleKey || (m && m[1]) || null;
+    if (!key) continue;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(f);
+  }
+
+  const groups: { key: string; items: FileItem[] }[] = [];
+  const pending: string[] = [];
+
+  for (const [key, items] of map.entries()) {
+    if (items.length >= required) {
+      groups.push({ key, items });
+    } else {
+      pending.push(`${key}(${items.length}/${required})`);
+    }
+  }
+
+  return { groups, pending };
+}
+
+function choosePrimaryAndAdditional(loc: LocationConfig, items: FileItem[]) {
+  const mf = loc.multiFile;
+  if (!mf?.enabled || items.length <= 1) return { primary: items[0], additional: items.slice(1) };
+
+  const primaryRx = mf.primaryFileRegex ? new RegExp(mf.primaryFileRegex, "i") : null;
+  let primary = items[0];
+
+  if (primaryRx) {
+    const match = items.find((i) => primaryRx.test(i.name));
+    if (match) primary = match;
+  }
+
+  const additional = items.filter((i) => i.path !== primary.path);
+  return { primary, additional };
+}
+
+async function uploadFiles(
+  loc: LocationConfig,
+  global: GlobalConfig,
+  primary: FileItem,
+  additional: FileItem[],
+  washerNameOverride?: string,
+): Promise<boolean> {
+  const stableWait = global.fileStabilityWaitMs ?? 750;
+
+  const allToCheck = [primary, ...additional];
+  for (const f of allToCheck) {
+    const ok = await isFileStable(f.path, stableWait);
+    if (!ok) {
+      await writeLog(`[${loc.id}] File not stable yet: ${f.path}`);
+      return false;
+    }
+  }
+
+  const token = await getAuthToken();
+  if (!token) return false;
+
+  const washerName = washerNameOverride ??
+    await extractWasherName(loc, global, primary.path, primary.folderName);
+
+  const serial = normalizeSerial(washerName, global.removeSpaces, global.removeHashtags);
+  const machineCode = `${loc.machineCode}-${serial}`;
+
+  let attempt = 0;
+  let success = false;
+
+  while (attempt < global.maxRetries && !success) {
+    attempt++;
+
+    try {
+      const fd = new FormData();
+
+      // Primary
+      const primaryBytes = await Deno.readFile(primary.path);
+      fd.append("file", new Blob([primaryBytes]), primary.name);
+
+      // Additional (repeat key)
+      for (const a of additional) {
+        const bytes = await Deno.readFile(a.path);
+        fd.append("additionalFiles", new Blob([bytes]), a.name);
+      }
+
+      fd.append("machineCode", machineCode);
+      fd.append("machineSerial", serial);
+
+      await writeLog(
+        `[${loc.id}] Attempt ${attempt}: Upload primary=${primary.name} additional=${additional.map((x) => x.name).join(",")} machineCode=${machineCode}`,
+      );
+
+      const resp = await fetch(API_URL, {
+        method: "POST",
+        headers: { "authorization": token },
+        body: fd,
+      });
+
+      const contentType = resp.headers.get("content-type") || "";
+      const body = contentType.includes("application/json") ? await resp.json() : await resp.text();
+
+      if (!resp.ok) {
+        const msg = typeof body === "string" ? body : (body?.message ?? JSON.stringify(body));
+        await writeLog(`[${loc.id}] Upload failed: HTTP ${resp.status} ${msg}`);
+      } else {
+        success = true;
+      }
+    } catch (err) {
+      await writeLog(`[${loc.id}] Upload error: ${err}`);
+    }
+
+    if (!success && attempt < global.maxRetries) {
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+
+  return success;
+}
+
+async function moveOnSuccess(loc: LocationConfig, filePath: string, desiredName?: string) {
+  const moveCfg = loc.onSuccessMove;
+  if (!moveCfg?.enabled) return;
+
+  await ensureDir(moveCfg.destination);
+  const name = desiredName ?? basename(filePath);
+  const dest = join(moveCfg.destination, name);
+  await safeMove(filePath, dest);
+  await writeLog(`[${loc.id}] Moved success file to: ${dest}`);
+}
+
+async function moveToResend(global: GlobalConfig, loc: LocationConfig, filePath: string, washerName: string) {
+  await ensureDir(global.resendFolder);
+  const originalName = basename(filePath);
+  const resendName = encodeResendName(loc.id, washerName, originalName);
+  const dest = join(global.resendFolder, resendName);
+  await safeMove(filePath, dest);
+  await writeLog(`[${loc.id}] Moved failed file to resend: ${dest}`);
+}
+
+async function processResendFolder(app: AppConfig) {
+  const resend = app.global.resendFolder;
+  await ensureDir(resend);
+
+  const exts = new Set(app.global.fileExtensions.map((e) => e.toLowerCase()));
+
+  // Collect resend files per location
+  const byLoc = new Map<string, FileItem[]>();
+
+  for await (const entry of Deno.readDir(resend)) {
+    if (!entry.isFile) continue;
+
+    const parsed = tryParseResendName(entry.name);
+    if (!parsed) continue;
+
+    const ext = extname(entry.name).toLowerCase();
+    if (!exts.has(ext)) continue;
+
+    const full = join(resend, entry.name);
+    const item: FileItem = { path: full, name: entry.name, folderName: null };
+
+    if (!byLoc.has(parsed.locId)) byLoc.set(parsed.locId, []);
+    byLoc.get(parsed.locId)!.push(item);
+  }
+
+  for (const [locId, items] of byLoc.entries()) {
+    const loc = app.locations.find((l) => l.id === locId);
+    if (!loc) {
+      await writeLog(`[resend] Unknown location id "${locId}" for ${items.length} file(s).`);
+      continue;
+    }
+
+    // Convert resend names back to "original" for grouping/primary selection
+    // but we keep the actual resend path for IO
+    const mapped = items.map((it) => {
+      const p = tryParseResendName(it.name)!;
+      return { ...it, name: p.original, _washer: p.washer, _locId: p.locId, _resendFullName: basename(it.path) } as any;
+    });
+
+    // Group using location multiFile rules (based on original filename)
+    const { groups, pending } = groupFilesIfEnabled(loc, mapped);
+    if (pending.length) await writeLog(`[${loc.id}] Resend pending groups: ${pending.join(", ")}`);
+
+    for (const g of groups) {
+      // Ensure group has enough members if multiFile is enabled
+      const mf = loc.multiFile;
+      const required = mf?.enabled ? (mf.requiredCount ?? 2) : 1;
+      if (mf?.enabled && g.items.length < required) continue;
+
+      const { primary, additional } = choosePrimaryAndAdditional(loc, g.items);
+      const washerOverride = (primary as any)._washer as string;
+
+      // Important: Upload uses "original names" for metadata but reads from resend paths
+      const primaryReal: FileItem = { path: (primary as any).path, name: (primary as any).name, folderName: null };
+      const additionalReal: FileItem[] = additional.map((a: any) => ({ path: a.path, name: a.name, folderName: null }));
+
+      const ok = await uploadFiles(loc, app.global, primaryReal, additionalReal, washerOverride);
+
+      // Mark and move outcomes
+      for (const f of [primary, ...additional]) {
+        await markProcessed(loc.id, (f as any).path, ok ? "success" : "failed", { resend: true });
+
+        if (ok) {
+          // Move to processed destination restoring original filename
+          await moveOnSuccess(loc, (f as any).path, (f as any).name);
+        } else {
+          // Keep in resend
+          await writeLog(`[${loc.id}] Resend failed, kept in resend: ${(f as any).path}`);
+        }
+      }
+    }
+  }
+}
+
+async function processLocation(app: AppConfig, loc: LocationConfig) {
+  await ensureDir(loc.watchFolder);
+
+  const candidates = await listCandidateFiles(loc, app.global, loc.watchFolder);
+  const fresh: FileItem[] = [];
+  for (const f of candidates) {
+    if (await alreadyProcessed(loc.id, f.path)) continue;
+    fresh.push(f);
+  }
+
+  // Group by cycle key if enabled (per location)
+  const { groups, pending } = groupFilesIfEnabled(loc, fresh);
+  if (pending.length) await writeLog(`[${loc.id}] Pending groups: ${pending.join(", ")}`);
+
+  // If multiFile enabled, optionally wait for groups to form before giving up
+  const mf = loc.multiFile;
+  const required = mf?.enabled ? (mf.requiredCount ?? 2) : 1;
+
+  for (const g of groups) {
+    if (mf?.enabled && g.items.length < required) continue;
+
+    const { primary, additional } = choosePrimaryAndAdditional(loc, g.items);
+
+    // Washer name is determined once per upload (primary)
+    const washerName = await extractWasherName(loc, app.global, primary.path, primary.folderName);
+
+    const ok = await uploadFiles(loc, app.global, primary, additional);
+
+    // Mark & move each file
+    for (const f of [primary, ...additional]) {
+      await markProcessed(loc.id, f.path, ok ? "success" : "failed", { groupKey: g.key });
+
+      if (ok) {
+        await moveOnSuccess(loc, f.path);
+      } else {
+        // Move each failed file to global resend with encoded name
+        await moveToResend(app.global, loc, f.path, washerName);
+      }
+    }
+
+    await writeLog(
+      `[${loc.id}] Group ${g.key}: ${ok ? "SUCCESS" : "FAILED"} files=${[primary.name, ...additional.map((x) => x.name)].join(", ")}`,
+    );
+  }
+}
+
+async function loadConfig(): Promise<AppConfig> {
+  if (!(await exists(CONFIG_PATH))) {
+    throw new Error(`Missing config file: ${CONFIG_PATH}`);
+  }
+
+  const raw = await Deno.readTextFile(CONFIG_PATH);
+  const cfg = JSON.parse(raw) as AppConfig;
+
+  if (!cfg.locations || cfg.locations.length === 0) {
+    await writeLog("Config has no locations. AutoBridge will idle.");
+  }
+  if (cfg.locations && cfg.locations.length > 10) {
+    throw new Error("Config has more than 10 locations (limit is 10).");
+  }
+
+  // Basic defaults/sanity
+  cfg.global.fileStabilityWaitMs ??= 750;
+  return cfg;
+}
+
+const app = await loadConfig();
+
+await ensureDir(app.global.resendFolder);
+await writeLog(`AutoBridge v4 started. Locations=${app.locations?.length ?? 0} Resend=${app.global.resendFolder}`);
+
+const pollMs = (app.global.pollIntervalSeconds ?? 10) * 1000;
+
+while (true) {
+  try {
+    // Resend first
+    await processResendFolder(app);
+
+    // Then each location
+    for (const loc of app.locations ?? []) {
+      try {
+        await processLocation(app, loc);
+      } catch (err) {
+        await writeLog(`[${loc.id}] Location error: ${err}`);
+      }
+    }
+  } catch (err) {
+    await writeLog(`Main loop error: ${err}`);
+  }
+
+  await new Promise((r) => setTimeout(r, pollMs));
+}
+
+// Graceful shutdown
+addEventListener("unload", () => db.close());

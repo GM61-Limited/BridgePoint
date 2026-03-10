@@ -1,0 +1,148 @@
+GM61 AutoBridge v4 - Configuration Instructions
+=============================================
+
+This version supports:
+- Up to 10 watch locations (you can use 1..10, all are optional)
+- Per-location washer name extraction: folder OR filename OR xml OR fixed
+- One global resend folder (next to AutoBridge) for any failed upload
+- Multi-file upload: primary "file" plus repeated "additionalFiles"
+- Optional move-on-success to a processed/archive folder
+
+
+1) Folder layout (recommended)
+------------------------------
+AutoBridge/
+  AutoBridge.ts
+  AutoBridge.config.json
+  .env
+  CONFIG_INSTRUCTIONS.txt
+  resend/           (created automatically)
+  logs/             (created automatically)
+
+
+2) Edit .env
+------------
+Required:
+- CONFIG_PATH=./AutoBridge.config.json
+- API_URL=<your upload endpoint>
+- AUTH_URL, AUTH_USERNAME, AUTH_PASSWORD
+
+Optional:
+- LOG_DIR=./logs
+
+
+3) Edit AutoBridge.config.json
+------------------------------
+Global settings:
+- pollIntervalSeconds: how often to scan folders
+- startDate: ignore files older than this date
+- fileExtensions: which file types to consider (e.g. .xml, .csv)
+- resendFolder: ONE resend folder for all locations (recommended: ./resend)
+
+Locations:
+Each location must have a unique "id".
+
+Per location:
+- watchFolder: local, mapped drive, or UNC path
+- mode:
+  - "root": files are directly in watchFolder
+  - "subfolder": watchFolder contains washer subfolders, files are inside each
+
+- machineCode: e.g. GETINGE, STERIS
+
+Washer name extraction (per location):
+- "folder": washer name = subfolder name (use with mode=subfolder)
+- "filename": washer name extracted from filename (set regex)
+- "xml": washer name from XML tag (xmlTag optional; uses xmlTagDefault if omitted)
+- "fixed": washer name forced to a constant (value)
+
+Filename washer name regex:
+- If you use named group (?<washer>...), AutoBridge uses that.
+- Otherwise AutoBridge uses capture group 1.
+
+Example:
+  "regex": "^(?<washer>[^_]+)_"
+File: "WASHER-1_cycle_123.xml" -> washer = "WASHER-1"
+
+
+4) Multi-file cycles (additionalFiles)
+--------------------------------------
+If some washers create multiple files per cycle:
+Enable multiFile in the location:
+
+- enabled: true
+- groupKeyRegex: extracts a shared key from filenames (prefer named group (?<cycleKey>...))
+- requiredCount: how many files must exist to upload as one unit
+- primaryFileRegex: which file becomes primary "file". All others become "additionalFiles".
+
+Example pair:
+  CYCLE_250501_092818.csv
+  PDVS_250501_092818.csv
+
+Use:
+  groupKeyRegex: "_(?<cycleKey>\\d{6}_\\d{6})\\."
+  requiredCount: 2
+  primaryFileRegex: "^CYCLE_"
+
+This will send:
+  file = CYCLE_...
+  additionalFiles = PDVS_...
+
+
+5) Global resend behaviour
+--------------------------
+On failure:
+- AutoBridge moves the file into ./resend with a name:
+  <locId>__<washerName>__<originalFileName>
+
+On next polls:
+- AutoBridge scans ./resend first
+- It re-uploads files using the embedded locId and washerName
+- On success it moves files to that location's onSuccessMove.destination (restoring original filename)
+- On failure it keeps them in resend
+
+NOTE: Because washerName is embedded at failure-time, resend works even if the original network share is offline.
+
+
+6) Running locally (Mac / Linux)
+--------------------------------
+From the AutoBridge folder:
+
+deno run --allow-read --allow-net --allow-env --allow-write --allow-run --unstable-kv AutoBridge.ts
+
+
+7) Running on Windows / network shares (Conny machine)
+------------------------------------------------------
+Important:
+- Use UNC paths in JSON for network shares:
+  "\\\\WASH01\\Exports"
+
+- If running as a service, ensure the service account has access to the shares.
+  LocalSystem often cannot access network shares.
+
+Recommended run:
+deno run --allow-read --allow-net --allow-env --allow-write --allow-run --unstable-kv AutoBridge.ts
+
+
+8) Testing checklist
+--------------------
+1) Start AutoBridge
+2) Drop a test file into each watchFolder
+3) Confirm logs in ./logs show detection + upload
+4) Force a failure (e.g. wrong API_URL) and confirm:
+   - file is moved to ./resend
+5) Fix API_URL and confirm resend processes and moves to processed folder
+
+
+9) Common config examples
+-------------------------
+A) One washer, one folder, constant washer name:
+washerName: { "source": "fixed", "value": "WASHER-1" }
+
+B) Many washers as subfolders:
+mode="subfolder"
+washerName.source="folder"
+
+C) Many washers dumped into one folder:
+mode="root"
+washerName.source="filename" with regex
