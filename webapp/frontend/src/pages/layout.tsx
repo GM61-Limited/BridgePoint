@@ -21,8 +21,23 @@ function applyTheme(t: Theme) {
   document.documentElement.setAttribute("data-bs-theme", actual);
 }
 
+/** Determine admin role from AuthContext user shape */
+function isAdminFromUser(user: any): boolean {
+  if (!user) return false;
+
+  // Preferred: roles array from /me
+  if (Array.isArray(user.roles)) {
+    const roles = user.roles.map((r: any) => String(r).toLowerCase());
+    return roles.includes("admin");
+  }
+
+  // Fallback: single role field
+  const role = String(user.role ?? user.user_role ?? user.userRole ?? "").toLowerCase();
+  return role === "admin";
+}
+
 export default function Layout() {
-  const { logout } = useAuth(); // logout does hard refresh
+  const { logout, user } = useAuth(); // ✅ now includes user
   const { environment, isEnabled, loading: modulesLoading, error: modulesError } = useModules();
 
   const [collapsed, setCollapsed] = useState(false);
@@ -30,6 +45,9 @@ export default function Layout() {
 
   // ✅ Notifications drawer state
   const [showNotifications, setShowNotifications] = useState(false);
+
+  // ✅ Admin check for nav gating
+  const isAdmin = isAdminFromUser(user);
 
   // --- Theme state ---
   const [theme, setTheme] = useState<Theme>(() => {
@@ -155,14 +173,12 @@ export default function Layout() {
           {/* -------- Machine Monitoring -------- */}
           {showMachineMonitoring && (
             <>
-              {/* ✅ Hide section titles when collapsed */}
               {!collapsed && (
                 <div className="px-3 pt-3 pb-1 text-secondary small" style={{ opacity: 0.9 }}>
                   MACHINE MONITORING
                 </div>
               )}
 
-              {/* Machines (overview/list) */}
               <NavLink
                 to="/machines"
                 end
@@ -173,7 +189,6 @@ export default function Layout() {
                 <span className="sidebar-label">Machines</span>
               </NavLink>
 
-              {/* Dashboard */}
               <NavLink
                 to="/machines/dashboard"
                 end
@@ -184,7 +199,6 @@ export default function Layout() {
                 <span className="sidebar-label">Dashboard</span>
               </NavLink>
 
-              {/* Health */}
               <NavLink
                 to="/machines/health"
                 end
@@ -195,7 +209,6 @@ export default function Layout() {
                 <span className="sidebar-label">Health</span>
               </NavLink>
 
-              {/* ✅ NEW: Maintenance */}
               <NavLink
                 to="/machines/maintenance"
                 end
@@ -206,9 +219,6 @@ export default function Layout() {
                 <span className="sidebar-label">Maintenance</span>
               </NavLink>
 
-              {/* Cycles */}
-              {/* NOTE: we intentionally DO NOT use `end` here,
-                 so Cycles stays highlighted for /wash-cycles/:id and /wash-cycles/upload */}
               <NavLink
                 to="/wash-cycles"
                 title={collapsed ? "Cycles" : undefined}
@@ -305,17 +315,18 @@ export default function Layout() {
             <span className="sidebar-label">Settings</span>
           </NavLink>
 
-          {/* ✅ NEW: Logs (core app, not machine-specific) */}
-          <NavLink
-            to="/logs"
-            title={collapsed ? "Logs" : undefined}
-            className={({ isActive }) => navClass(isActive)}
-          >
-            <i className={iconCls("bi-journal-text")} aria-hidden="true" />
-            <span className="sidebar-label">Logs</span>
-          </NavLink>
+          {/* ✅ Logs: admin-only in nav */}
+          {isAdmin && (
+            <NavLink
+              to="/logs"
+              title={collapsed ? "Logs" : undefined}
+              className={({ isActive }) => navClass(isActive)}
+            >
+              <i className={iconCls("bi-journal-text")} aria-hidden="true" />
+              <span className="sidebar-label">Logs</span>
+            </NavLink>
+          )}
 
-          {/* ✅ NEW: Help (core app) */}
           <NavLink
             to="/help"
             title={collapsed ? "Help" : undefined}
@@ -357,7 +368,7 @@ export default function Layout() {
             <span className="badge bg-secondary">{envLabel}</span>
 
             <div className="d-flex align-items-center gap-2">
-              {/* Notifications (drawer trigger) */}
+              {/* Notifications */}
               <button
                 type="button"
                 className={`btn btn-sm ${btnOutline}`}
@@ -411,12 +422,9 @@ export default function Layout() {
         </main>
       </div>
 
-      {/* ==================================================
-          Notifications Drawer (slide-over from right)
-         ================================================== */}
+      {/* Notifications Drawer */}
       {showNotifications && (
         <>
-          {/* Backdrop */}
           <div
             onClick={() => setShowNotifications(false)}
             style={{
@@ -428,7 +436,6 @@ export default function Layout() {
             aria-hidden="true"
           />
 
-          {/* Drawer panel */}
           <div
             id="notifications-drawer"
             role="dialog"
