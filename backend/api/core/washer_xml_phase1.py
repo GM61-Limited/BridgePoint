@@ -1,33 +1,91 @@
-# app/core/washer_xml_phase1.py
-
 import json
-from typing import Dict, List
-from datetime import datetime
+from typing import Dict, List, Any
+from datetime import datetime, timedelta
 
 from app.core.washer_xml_common import (
-    extract_xml_map,
     parse_epoch,
     first_present,
     parse_result,
     canonical_stage,
 )
 
+from app.core.process_signals import parse_process_signals_from_xml
+
 
 def _valid_epoch(dt: datetime | None) -> datetime | None:
-    """
-    Guard against invalid washer timestamps.
-    Many MMM washers emit -3600000 or 0 for unused dates.
-    """
     if not dt:
         return None
     try:
-        # Defensive: epoch 0 / negative dates are not valid cycle times
         if dt.timestamp() <= 0:
             return None
     except Exception:
         return None
     return dt
 
+
+# ------------------------------------------------------------------
+# Stage temperature logic
+# ------------------------------------------------------------------
+
+def _stage_temperature(
+    rows: List[Dict[str, Any]],
+    start: datetime,
+    end: datetime,
+    stage_name: str,
+) -> float | None:
+    """
+    Derive stage temperature from process signals.
+
+    Rules:
+      - Normal stages: average temp during stage
+      - Pre-wash: first temp >= start
+      - Drying: max temp within 5 minutes AFTER stage end
+    """
+
+    # -------------------------
+    # Temps during stage
+    # -------------------------
+
+    temps_during = [
+        row["values"]["temperature_1"]
+        for row in rows
+        if start <= row["timestamp"] <= end
+        and "temperature_1" in row["values"]
+    ]
+
+    if temps_during:
+        return round(sum(temps_during) / len(temps_during), 2)
+
+    # -------------------------
+    # Pre-wash fallback
+    # -------------------------
+
+    if stage_name == "pre_wash":
+        for row in rows:
+            if row["timestamp"] >= start and "temperature_1" in row["values"]:
+                return round(row["values"]["temperature_1"], 2)
+
+    # -------------------------
+    # Drying fallback (heat continues after stage)
+    # -------------------------
+
+    if stage_name == "drying":
+        cutoff = end + timedelta(minutes=5)
+        temps_after = [
+            row["values"]["temperature_1"]
+            for row in rows
+            if end <= row["timestamp"] <= cutoff
+            and "temperature_1" in row["values"]
+        ]
+        if temps_after:
+            return round(max(temps_after), 2)
+
+    return None
+
+
+# ------------------------------------------------------------------
+# Phase‑1 parser
+# ------------------------------------------------------------------
 
 def parse_washer_xml_phase1(
     conn,
@@ -42,11 +100,30 @@ def parse_washer_xml_phase1(
     """
 
     cur = conn.cursor()
-    xml: Dict[str, str] = extract_xml_map(xml_path)
 
-    # -------------------------
+    # --------------------------------------------------
+    # Load raw XML bytes
+    # --------------------------------------------------
+
+    with open(xml_path, "rb") as f:
+        xml_bytes = f.read()
+
+    # --------------------------------------------------
+    # Parse process signals (same source as graph)
+    # --------------------------------------------------
+
+    process_rows = parse_process_signals_from_xml(xml_bytes)
+
+    # --------------------------------------------------
+    # XML map for metadata / stages
+    # --------------------------------------------------
+
+    from app.core.washer_xml_common import extract_xml_map
+    xml = extract_xml_map(xml_path)
+
+    # --------------------------------------------------
     # Cycle metadata
-    # -------------------------
+    # --------------------------------------------------
 
     try:
         cycle_number = int(xml.get("chargnr"))
@@ -62,20 +139,20 @@ def parse_washer_xml_phase1(
 
     result = parse_result(xml, xml_path)
 
-    # -------------------------
+    # --------------------------------------------------
     # Stage metadata
-    # -------------------------
+    # --------------------------------------------------
 
     extra = {"stages": {}}
     stage_start_times: List[datetime] = []
     stage_end_times: List[datetime] = []
 
     for stage_idx in range(0, 10):
-        stage_name = xml.get(f"wiStageName:{stage_idx}")
-        if not stage_name:
+        name = xml.get(f"wiStageName:{stage_idx}")
+        if not name:
             continue
 
-        canonical = canonical_stage(stage_name)
+        canonical = canonical_stage(name)
         if not canonical:
             continue
 
@@ -90,6 +167,10 @@ def parse_washer_xml_phase1(
             f"wiStageEnd:{stage_idx}",
         )
 
+        if canonical == "disinfection":
+            start_val = first_present(xml, "disinfectionStart", start_val)
+            end_val = first_present(xml, "disinfectionEnd", end_val)
+
         started_at = _valid_epoch(parse_epoch(start_val))
         ended_at = _valid_epoch(parse_epoch(end_val))
 
@@ -98,57 +179,35 @@ def parse_washer_xml_phase1(
         if ended_at:
             stage_end_times.append(ended_at)
 
-        stage_data = {}
-        if started_at:
-            stage_data["started_at"] = started_at.isoformat()
-        if ended_at:
-            stage_data["ended_at"] = ended_at.isoformat()
+        temperature_c = None
+        if started_at and ended_at and process_rows:
+            temperature_c = _stage_temperature(
+                process_rows,
+                started_at,
+                ended_at,
+                canonical,
+            )
 
-        if stage_data:
-            extra["stages"][canonical] = stage_data
+        extra["stages"][canonical] = {
+            "started_at": started_at.isoformat() if started_at else None,
+            "ended_at": ended_at.isoformat() if ended_at else None,
+            "temperature_c": temperature_c,
+        }
 
-    # -------------------------
-    # Authoritative cycle times
-    # -------------------------
+    # --------------------------------------------------
+    # Cycle timing (earliest stage = Pre‑Wash)
+    # --------------------------------------------------
 
-    # Start: prefer chargstart, fallback to earliest stage start
-    cycle_started_at = _valid_epoch(parse_epoch(xml.get("chargstart")))
-
-    # End: prefer chargende (authoritative)
-    cycle_ended_at = _valid_epoch(parse_epoch(xml.get("chargende")))
-
-    # Fallback 1: latest stageChange:*
-    if not cycle_ended_at:
-        stage_changes: List[datetime] = []
-        for key, val in xml.items():
-            if key.startswith("stageChange:"):
-                ts = _valid_epoch(parse_epoch(val))
-                if ts:
-                    stage_changes.append(ts)
-
-        if stage_changes:
-            cycle_ended_at = max(stage_changes)
-
-    # Fallback 2: stage end times (least reliable)
-    started_at = cycle_started_at or (
-        min(stage_start_times) if stage_start_times else None
-    )
-
-    ended_at = cycle_ended_at or (
-        max(stage_end_times) if stage_end_times else None
-    )
-
-    # -------------------------
-    # Duration
-    # -------------------------
+    started_at = min(stage_start_times) if stage_start_times else None
+    ended_at = max(stage_end_times) if stage_end_times else None
 
     duration_sec = None
     if started_at and ended_at and ended_at > started_at:
         duration_sec = int((ended_at - started_at).total_seconds())
 
-    # -------------------------
+    # --------------------------------------------------
     # Insert washer_cycles
-    # -------------------------
+    # --------------------------------------------------
 
     cur.execute(
         """
@@ -197,9 +256,9 @@ def parse_washer_xml_phase1(
         )
         cycle_id = cur.fetchone()[0]
 
-    # -------------------------
+    # --------------------------------------------------
     # Mark upload parsed
-    # -------------------------
+    # --------------------------------------------------
 
     cur.execute(
         """
