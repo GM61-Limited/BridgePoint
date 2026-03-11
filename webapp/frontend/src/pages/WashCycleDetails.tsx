@@ -52,7 +52,7 @@ const SENSOR_COLOURS: Record<string, string> = {
    Helpers
 -------------------------------------------------- */
 
-function formatDateTime(value?: string) {
+function formatDateTime(value?: string | null) {
   return value ? new Date(value).toLocaleString() : "—";
 }
 
@@ -71,32 +71,29 @@ function badgeClass(result: "PASS" | "FAIL" | "UNKNOWN") {
   return "bg-secondary";
 }
 
-function normalizeTsMs(ts: number | string): number | null {
-  // Accept ms epoch, sec epoch, numeric strings, ISO strings
-  if (typeof ts === "number") {
-    if (!Number.isFinite(ts)) return null;
-    // seconds epoch?
-    if (ts > 0 && ts < 1e11) return ts * 1000;
-    return ts;
+/* --------------------------------------------------
+   Timestamp normalisation (cycle-aware)
+-------------------------------------------------- */
+
+function normalizeTsMsWithAnchor(
+  ts: number | string,
+  cycleStartMs: number | null
+): number | null {
+  const n = typeof ts === "number" ? ts : Number(ts);
+  if (!Number.isFinite(n)) return null;
+
+  if (n > 1e11) return n;
+  if (n > 1e9) return n * 1000;
+
+  if (cycleStartMs !== null) {
+    return cycleStartMs + n * 1000;
   }
 
-  const s = String(ts).trim();
-  if (!s) return null;
-
-  // ISO date?
-  const parsed = Date.parse(s);
-  if (!Number.isNaN(parsed)) return parsed;
-
-  // numeric string
-  const n = Number(s);
-  if (!Number.isFinite(n)) return null;
-  if (n > 0 && n < 1e11) return n * 1000;
-  return n;
+  return null;
 }
 
 function normalizeNumber(v: number | string): number | null {
-  if (typeof v === "number") return Number.isFinite(v) ? v : null;
-  const n = Number(String(v).trim());
+  const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : null;
 }
 
@@ -115,27 +112,74 @@ function isDarkMode() {
   return window.matchMedia?.("(prefers-color-scheme: dark)")?.matches ?? false;
 }
 
+function sensorToYAxis(sensor: string) {
+  switch (sensor) {
+    case "temperature_1":
+    case "temperature_2":
+      return "yTemp";
+    case "a0":
+      return "yA0";
+    case "pressure":
+      return "yPressure";
+    case "conductivity":
+      return "yConductivity";
+    default:
+      return "yTemp";
+  }
+}
+
 /* --------------------------------------------------
-   Plugin: fill plot area background to match theme
+   Plugins
 -------------------------------------------------- */
 
+/** Plot background (theme-aware) */
 const plotBackgroundPlugin = {
   id: "plotBackground",
   beforeDraw: (chart: any) => {
     const { ctx, chartArea } = chart;
     if (!chartArea) return;
 
-    const dark = isDarkMode();
-    const bg = dark ? "#111318" : "#ffffff";
-
+    const bg = isDarkMode() ? "#212529" : "#ffffff";
     ctx.save();
     ctx.fillStyle = bg;
-    ctx.fillRect(chartArea.left, chartArea.top, chartArea.width, chartArea.height);
+    ctx.fillRect(
+      chartArea.left,
+      chartArea.top,
+      chartArea.width,
+      chartArea.height
+    );
     ctx.restore();
   },
 };
 
-ChartJS.register(plotBackgroundPlugin);
+/** Vertical hover line */
+const hoverLinePlugin = {
+  id: "hoverLine",
+  afterDraw: (chart: any) => {
+    const tooltip = chart.tooltip;
+    if (!tooltip || !tooltip.getActiveElements().length) return;
+
+    const { ctx, chartArea } = chart;
+    const x = tooltip.getActiveElements()[0].element.x;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x, chartArea.top);
+    ctx.lineTo(x, chartArea.bottom);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = isDarkMode()
+      ? "rgba(255,255,255,0.25)"
+      : "rgba(0,0,0,0.25)";
+    ctx.stroke();
+    ctx.restore();
+  },
+};
+
+ChartJS.register(plotBackgroundPlugin, hoverLinePlugin);
+
+/* --------------------------------------------------
+   Component
+-------------------------------------------------- */
 
 export default function WashCycleDetails() {
   const { id } = useParams<{ id: string }>();
@@ -143,41 +187,45 @@ export default function WashCycleDetails() {
 
   const [cycle, setCycle] = useState<WasherCycle | null>(null);
   const [telemetry, setTelemetry] = useState<TelemetrySeries[]>([]);
-  const [validation, setValidation] = useState<"PASS" | "FAIL" | "UNKNOWN">("UNKNOWN");
+  const [validation, setValidation] = useState<"PASS" | "FAIL" | "UNKNOWN">(
+    "UNKNOWN"
+  );
   const [loading, setLoading] = useState(true);
 
-  /**
-   * ✅ Scope-preserving back link
-   * Prefer returnTo; fallback to machineId/machine; else /wash-cycles.
-   */
-  const backToCyclesHref = useMemo(() => {
-    const rt = (params.get("returnTo") || "").trim();
-
-    // Prevent open redirects: only allow internal return to cycles.
-    if (rt && rt.startsWith("/wash-cycles")) return rt;
-
-    // Fallback: rebuild from machineId (+ optional machine label)
-    const machineId = params.get("machineId") || params.get("device");
-    const machineLabel = params.get("machine");
-
-    const q = new URLSearchParams();
-    if (machineId) q.set("machineId", machineId);
-    if (machineLabel) q.set("machine", machineLabel);
-
-    const qs = q.toString();
-    return `/wash-cycles${qs ? `?${qs}` : ""}`;
-  }, [params]);
+  /** ✅ Forces chart remount on theme change */
+  const [themeKey, setThemeKey] = useState(0);
 
   /* --------------------------------------------------
-     Load data
+     Observe theme changes
   -------------------------------------------------- */
+
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setThemeKey((k) => k + 1);
+    });
+
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-bs-theme"],
+    });
+
+    return () => observer.disconnect();
+  }, []);
+
+  const backToCyclesHref = useMemo(() => {
+    const rt = (params.get("returnTo") || "").trim();
+    if (rt && rt.startsWith("/wash-cycles")) return rt;
+    return "/wash-cycles";
+  }, [params]);
 
   useEffect(() => {
     if (!id) return;
 
     setLoading(true);
-
-    Promise.all([getWasherCycle(Number(id)), getWasherCycleTelemetry(Number(id))])
+    Promise.all([
+      getWasherCycle(Number(id)),
+      getWasherCycleTelemetry(Number(id)),
+    ])
       .then(([cycleData, telemetryData]) => {
         setCycle(cycleData);
         setTelemetry((telemetryData.points ?? []) as TelemetrySeries[]);
@@ -186,18 +234,17 @@ export default function WashCycleDetails() {
       .finally(() => setLoading(false));
   }, [id]);
 
-  /* --------------------------------------------------
-     Compute X range from telemetry itself (NOT end time)
-     This prevents “wrong end time” from hiding points.
-  -------------------------------------------------- */
+  const cycleStartMs = cycle?.started_at
+    ? new Date(cycle.started_at).getTime()
+    : null;
 
   const xRange = useMemo(() => {
-    let min = Number.POSITIVE_INFINITY;
-    let max = Number.NEGATIVE_INFINITY;
+    let min = Infinity;
+    let max = -Infinity;
 
     for (const s of telemetry) {
       for (const [ts] of s.series ?? []) {
-        const t = normalizeTsMs(ts);
+        const t = normalizeTsMsWithAnchor(ts, cycleStartMs);
         if (t === null) continue;
         min = Math.min(min, t);
         max = Math.max(max, t);
@@ -205,50 +252,38 @@ export default function WashCycleDetails() {
     }
 
     if (!Number.isFinite(min) || !Number.isFinite(max)) {
-      // fallback: 1 hour window starting “now”
       const now = Date.now();
-      return { min: floorToMinute(now), max: ceilToMinute(now + 60 * 60 * 1000) };
+      return { min: floorToMinute(now), max: ceilToMinute(now + 3600000) };
     }
 
-    // round to minute boundaries so ticks are “every minute from start minute”
     return { min: floorToMinute(min), max: ceilToMinute(max) };
-  }, [telemetry]);
-
-  /* --------------------------------------------------
-     Telemetry chart
-  -------------------------------------------------- */
+  }, [telemetry, cycleStartMs]);
 
   const datasets = useMemo(() => {
     return telemetry.map((s) => {
-      const points = (s.series ?? [])
+      const data = (s.series ?? [])
         .map(([ts, value]) => {
-          const t = normalizeTsMs(ts);
-          const v = normalizeNumber(value);
-          if (t === null || v === null) return null;
-          return { x: t, y: v };
+          const x = normalizeTsMsWithAnchor(ts, cycleStartMs);
+          const y = normalizeNumber(value);
+          if (x === null || y === null) return null;
+          return { x, y };
         })
-        .filter((p): p is { x: number; y: number } => !!p)
-        .sort((a, b) => a.x - b.x);
+        .filter(Boolean)
+        .sort((a: any, b: any) => a.x - b.x);
 
       return {
         label: `${s.sensor} (${s.unit})`,
-        data: points,
+        data,
         borderColor: SENSOR_COLOURS[s.sensor] ?? "#999",
         backgroundColor: SENSOR_COLOURS[s.sensor] ?? "#999",
         stepped: true,
         pointRadius: 0,
         borderWidth: 2,
-        parsing: false as const, // important with {x,y}
+        parsing: false as const,
+        yAxisID: sensorToYAxis(s.sensor),
       };
     });
-  }, [telemetry]);
-
-  const chartData = useMemo(() => ({ datasets }), [datasets]);
-
-  const hasAnyPoints = useMemo(
-    () => datasets.some((d: any) => (d.data?.length ?? 0) > 1),
-    [datasets]
-  );
+  }, [telemetry, cycleStartMs]);
 
   const dark = isDarkMode();
   const axisText = dark ? "#e5e7eb" : "#111827";
@@ -264,31 +299,47 @@ export default function WashCycleDetails() {
           type: "linear" as const,
           min: xRange.min,
           max: xRange.max,
-          title: { display: true, text: "Time", color: axisText },
-          grid: { color: grid },
           ticks: {
-            stepSize: 60_000, // every minute
-            autoSkip: true,
-            maxTicksLimit: 18,
-            maxRotation: 65,
-            minRotation: 65,
             color: axisText,
-            callback: (value: string | number) => {
-              const n = typeof value === "number" ? value : Number(value);
-              if (!Number.isFinite(n)) return String(value);
-              return new Date(n).toLocaleTimeString([], {
+            callback: (v: number | string) =>
+              new Date(Number(v)).toLocaleTimeString([], {
                 hour: "2-digit",
                 minute: "2-digit",
                 second: "2-digit",
-              });
-            },
+                hour12: false,
+              }),
           },
-        },
-        y: {
-          beginAtZero: false,
-          title: { display: true, text: "Value", color: axisText },
           grid: { color: grid },
+        },
+        yTemp: {
+          position: "left" as const,
+          title: { display: true, text: "Temperature (°C)", color: axisText },
           ticks: { color: axisText },
+          grid: { color: grid },
+        },
+        yA0: {
+          position: "left" as const,
+          offset: true,
+          title: { display: true, text: "A₀", color: axisText },
+          ticks: { color: axisText },
+          grid: { drawOnChartArea: false },
+        },
+        yPressure: {
+          position: "right" as const,
+          title: { display: true, text: "Pressure (bar)", color: axisText },
+          ticks: { color: axisText },
+          grid: { drawOnChartArea: false },
+        },
+        yConductivity: {
+          position: "right" as const,
+          offset: true,
+          title: {
+            display: true,
+            text: "Conductivity (µS/cm)",
+            color: axisText,
+          },
+          ticks: { color: axisText },
+          grid: { drawOnChartArea: false },
         },
       },
       plugins: {
@@ -298,51 +349,41 @@ export default function WashCycleDetails() {
         },
       },
     }),
-    [xRange.min, xRange.max, axisText, grid]
+    [xRange, axisText, grid]
   );
 
-  /* --------------------------------------------------
-     Render guards (after hooks)
-  -------------------------------------------------- */
+  if (loading || !cycle) {
+    return <div className="container py-4">Loading…</div>;
+  }
 
-  if (loading || !cycle) return <div className="container py-4">Loading…</div>;
+  const startedAt = cycle.started_at;
+  const endedAt = cycle.ended_at;
+
+  const durationSeconds =
+    startedAt && endedAt
+      ? (new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 1000
+      : null;
 
   const stages = (cycle as any).extra?.stages ?? {};
 
-  const startedAt = (cycle as any).started_at as string | undefined;
-  const endedAt = (cycle as any).ended_at as string | undefined;
-  const durationSeconds =
-    (cycle as any)?.duration_seconds ??
-    (startedAt && endedAt
-      ? (new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 1000
-      : null);
-
-  const formatStartEnd = (stage?: any) => {
-    if (!stage) return "—";
-    const start = formatDateTime(stage.started_at);
-    const end = formatDateTime(stage.ended_at);
-    if (start === "—" && end === "—") return "—";
-    return `${start} → ${end}`;
-  };
-
-  const formatTemp = (value?: number) => (value !== undefined ? `${value} °C` : "—");
-
   return (
     <div className="container py-4">
-      <div className="d-flex align-items-center justify-content-between mb-3">
-        {/* ✅ Back respects machine scope */}
-        <Link to={backToCyclesHref} className="btn btn-link btn-sm">
-          ← Back to cycles
-        </Link>
-      </div>
+      <Link to={backToCyclesHref} className="btn btn-link btn-sm mb-2">
+        ← Back to cycles
+      </Link>
 
-      {/* Header */}
       <div className="card mb-3">
         <div className="card-body">
           <div className="d-flex align-items-center gap-2 mb-2">
-            <h1 className="h4 mb-0">Cycle {cycle.cycle_number ? `#${cycle.cycle_number}` : ""}</h1>
+            <h1 className="h4 mb-0">
+              Cycle {cycle.cycle_number ? `#${cycle.cycle_number}` : ""}
+            </h1>
             <span className={`badge ${badgeClass(validation)}`}>
-              {validation === "PASS" ? "Cycle OK" : validation === "FAIL" ? "Cycle FAIL" : "Unknown"}
+              {validation === "PASS"
+                ? "Cycle OK"
+                : validation === "FAIL"
+                ? "Cycle FAIL"
+                : "Unknown"}
             </span>
           </div>
 
@@ -358,88 +399,56 @@ export default function WashCycleDetails() {
               <span className="mx-2">•</span>
               <strong>End:</strong> {formatDateTime(endedAt)}
               <span className="mx-2">•</span>
-              <strong>Duration:</strong> {formatDurationSeconds(durationSeconds)}
+              <strong>Duration:</strong>{" "}
+              {formatDurationSeconds(durationSeconds)}
             </div>
           </div>
         </div>
       </div>
 
-      {/* Chart */}
       <div className="card mb-3">
         <div className="card-body">
           <h2 className="h6 mb-3">Cycle telemetry</h2>
-
           <div style={{ height: 580 }}>
-            {!hasAnyPoints ? (
-              <div className="text-secondary">
-                No telemetry plotted — telemetry points may be empty or not parseable.
-              </div>
-            ) : (
-              <Line data={chartData} options={chartOptions as any} />
-            )}
-          </div>
-
-          {/* Quick debug you can remove later */}
-          <div className="text-secondary small mt-2">
-            Debug: datasets={datasets.length} • points=
-            {datasets.reduce((a: number, d: any) => a + (d.data?.length ?? 0), 0)}
-            {" • xRange="}
-            {new Date(xRange.min).toLocaleTimeString()} → {new Date(xRange.max).toLocaleTimeString()}
+            <Line
+              key={themeKey}
+              data={{ datasets }}
+              options={chartOptions as any}
+            />
           </div>
         </div>
       </div>
 
-      {/* Params */}
       <div className="card">
         <div className="card-body">
           <h2 className="h6 mb-3">Wash Cycle Critical Parameters</h2>
           <table className="table table-sm mb-0">
             <tbody>
-              <tr>
-                <td>Pre Wash Start / End</td>
-                <td className="text-end">{formatStartEnd(stages.pre_wash)}</td>
-              </tr>
-              <tr>
-                <td>Pre Wash Temp</td>
-                <td className="text-end">{formatTemp(stages.pre_wash?.temperature_c)}</td>
-              </tr>
-
-              <tr>
-                <td>Wash Start / End</td>
-                <td className="text-end">{formatStartEnd(stages.wash)}</td>
-              </tr>
-              <tr>
-                <td>Wash Temp</td>
-                <td className="text-end">{formatTemp(stages.wash?.temperature_c)}</td>
-              </tr>
-
-              <tr>
-                <td>Rinse Start / End</td>
-                <td className="text-end">{formatStartEnd(stages.rinse)}</td>
-              </tr>
-              <tr>
-                <td>Rinse Temp</td>
-                <td className="text-end">{formatTemp(stages.rinse?.temperature_c)}</td>
-              </tr>
-
-              <tr>
-                <td>Disinfection Start / End</td>
-                <td className="text-end">{formatStartEnd(stages.disinfection)}</td>
-              </tr>
-              <tr>
-                <td>Disinfection Temp</td>
-                <td className="text-end">{formatTemp(stages.disinfection?.temperature_c)}</td>
-              </tr>
-
-              <tr>
-                <td>Drying Start / End</td>
-                <td className="text-end">{formatStartEnd(stages.drying)}</td>
-              </tr>
-              <tr>
-                <td>Drying Temp</td>
-                <td className="text-end">{formatTemp(stages.drying?.temperature_c)}</td>
-              </tr>
-
+              {[
+                ["Pre Wash", stages.pre_wash],
+                ["Wash", stages.wash],
+                ["Rinse", stages.rinse],
+                ["Disinfection", stages.disinfection],
+                ["Drying", stages.drying],
+              ].map(([label, stage]: any) => (
+                <>
+                  <tr>
+                    <td>{label} Start / End</td>
+                    <td className="text-end">
+                      {formatDateTime(stage?.started_at)} →{" "}
+                      {formatDateTime(stage?.ended_at)}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>{label} Temp</td>
+                    <td className="text-end">
+                      {stage?.temperature_c !== undefined
+                        ? `${stage.temperature_c} °C`
+                        : "—"}
+                    </td>
+                  </tr>
+                </>
+              ))}
               <tr>
                 <td className="fw-semibold">Pass / Fail</td>
                 <td className="text-end fw-bold">{validation}</td>
