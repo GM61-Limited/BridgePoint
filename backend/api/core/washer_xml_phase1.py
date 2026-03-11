@@ -1,7 +1,8 @@
 # app/core/washer_xml_phase1.py
 
 import json
-from typing import Dict
+from typing import Dict, List
+from datetime import datetime
 
 from app.core.washer_xml_common import (
     extract_xml_map,
@@ -10,6 +11,22 @@ from app.core.washer_xml_common import (
     parse_result,
     canonical_stage,
 )
+
+
+def _valid_epoch(dt: datetime | None) -> datetime | None:
+    """
+    Guard against invalid washer timestamps.
+    Many MMM washers emit -3600000 or 0 for unused dates.
+    """
+    if not dt:
+        return None
+    try:
+        # Defensive: epoch 0 / negative dates are not valid cycle times
+        if dt.timestamp() <= 0:
+            return None
+    except Exception:
+        return None
+    return dt
 
 
 def parse_washer_xml_phase1(
@@ -50,10 +67,10 @@ def parse_washer_xml_phase1(
     # -------------------------
 
     extra = {"stages": {}}
-    stage_start_times = []
-    stage_end_times = []
+    stage_start_times: List[datetime] = []
+    stage_end_times: List[datetime] = []
 
-    for stage_idx in range(0, 6):
+    for stage_idx in range(0, 10):
         stage_name = xml.get(f"wiStageName:{stage_idx}")
         if not stage_name:
             continue
@@ -73,8 +90,8 @@ def parse_washer_xml_phase1(
             f"wiStageEnd:{stage_idx}",
         )
 
-        started_at = parse_epoch(start_val)
-        ended_at = parse_epoch(end_val)
+        started_at = _valid_epoch(parse_epoch(start_val))
+        ended_at = _valid_epoch(parse_epoch(end_val))
 
         if started_at:
             stage_start_times.append(started_at)
@@ -90,8 +107,40 @@ def parse_washer_xml_phase1(
         if stage_data:
             extra["stages"][canonical] = stage_data
 
-    started_at = min(stage_start_times) if stage_start_times else None
-    ended_at = max(stage_end_times) if stage_end_times else None
+    # -------------------------
+    # Authoritative cycle times
+    # -------------------------
+
+    # Start: prefer chargstart, fallback to earliest stage start
+    cycle_started_at = _valid_epoch(parse_epoch(xml.get("chargstart")))
+
+    # End: prefer chargende (authoritative)
+    cycle_ended_at = _valid_epoch(parse_epoch(xml.get("chargende")))
+
+    # Fallback 1: latest stageChange:*
+    if not cycle_ended_at:
+        stage_changes: List[datetime] = []
+        for key, val in xml.items():
+            if key.startswith("stageChange:"):
+                ts = _valid_epoch(parse_epoch(val))
+                if ts:
+                    stage_changes.append(ts)
+
+        if stage_changes:
+            cycle_ended_at = max(stage_changes)
+
+    # Fallback 2: stage end times (least reliable)
+    started_at = cycle_started_at or (
+        min(stage_start_times) if stage_start_times else None
+    )
+
+    ended_at = cycle_ended_at or (
+        max(stage_end_times) if stage_end_times else None
+    )
+
+    # -------------------------
+    # Duration
+    # -------------------------
 
     duration_sec = None
     if started_at and ended_at and ended_at > started_at:
@@ -147,6 +196,10 @@ def parse_washer_xml_phase1(
             (machine_id, cycle_number),
         )
         cycle_id = cur.fetchone()[0]
+
+    # -------------------------
+    # Mark upload parsed
+    # -------------------------
 
     cur.execute(
         """
