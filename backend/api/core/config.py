@@ -1,3 +1,4 @@
+# app/core/config.py
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional, List
 import json
@@ -15,7 +16,7 @@ class Settings(BaseSettings):
     # Supports:
     #   - CSV:  "http://localhost,http://127.0.0.1"
     #   - JSON: '["http://localhost","http://127.0.0.1"]'
-    ROOT_PATH: str=""
+    ROOT_PATH: str = ""
     ALLOWED_ORIGINS: str = "http://localhost,http://127.0.0.1"
 
     @property
@@ -43,6 +44,25 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "your_secret_key"  # override in prod via .env / secrets
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+
+    # ✅ Option A: short-lived refresh token (longer than access token)
+    REFRESH_TOKEN_EXPIRE_MINUTES: int = 60
+
+    # -----------------------------
+    # Refresh cookie settings
+    # -----------------------------
+    # Cookie name for refresh token
+    REFRESH_COOKIE_NAME: str = "bp_refresh"
+
+    # Cookie security flags:
+    # - In production over HTTPS: set COOKIE_SECURE=True
+    # - If frontend + backend are on different subdomains and you need cross-site cookies:
+    #     set COOKIE_SAMESITE="none" AND COOKIE_SECURE=True
+    COOKIE_SECURE: bool = False
+    COOKIE_HTTPONLY: bool = True
+    COOKIE_SAMESITE: str = "lax"   # "lax" | "strict" | "none"
+    COOKIE_DOMAIN: Optional[str] = None  # e.g. ".bridgepoint.co.uk" (optional)
+    COOKIE_PATH: str = "/"  # usually "/"
 
     # -----------------------------
     # Database

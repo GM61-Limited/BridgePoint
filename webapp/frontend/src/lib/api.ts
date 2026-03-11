@@ -4,7 +4,18 @@ import type { Environment, ModuleToggle } from "../features/modules/types";
 
 let bearerToken: string | null = null;
 
-/** Set the token after login */
+/**
+ * Allow the React auth layer to subscribe to forced-logout events.
+ * We can't use hooks inside this file, so we expose a handler setter.
+ */
+type AuthFailReason = "expired" | "unauthorized" | "refresh_failed";
+let authFailureHandler: ((reason: AuthFailReason) => void) | null = null;
+
+export function setAuthFailureHandler(handler: ((reason: AuthFailReason) => void) | null) {
+  authFailureHandler = handler;
+}
+
+/** Set the token after login / refresh */
 export function setToken(token: string | null) {
   bearerToken = token;
 }
@@ -26,6 +37,15 @@ if (typeof window !== "undefined") {
 export const api = axios.create({
   baseURL: computedBaseURL,
   withCredentials: true, // enables cookies if server sets them
+});
+
+/**
+ * Separate client used only for refreshing tokens.
+ * This avoids recursion through api interceptors when /refresh returns 401.
+ */
+const refreshClient = axios.create({
+  baseURL: computedBaseURL,
+  withCredentials: true,
 });
 
 /** Safe header setter for axios v1 (handles AxiosHeaders vs plain object) */
@@ -82,11 +102,96 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Optional: centralize error handling (e.g., 401)
+/**
+ * Refresh lock:
+ * - If multiple requests 401 simultaneously, only one refresh call is made.
+ * - Others await the same promise.
+ */
+let refreshPromise: Promise<string | null> | null = null;
+
+async function refreshAccessToken(): Promise<string | null> {
+  // If there is already a refresh in flight, await it.
+  if (refreshPromise) return refreshPromise;
+
+  refreshPromise = (async () => {
+    try {
+      const { data } = await refreshClient.post<{ access_token?: string; token_type?: string }>(
+        "/refresh"
+      );
+
+      const newToken = data?.access_token ?? null;
+      if (newToken) {
+        setToken(newToken);
+        return newToken;
+      }
+
+      return null;
+    } catch (e) {
+      return null;
+    } finally {
+      // allow future refresh attempts
+      refreshPromise = null;
+    }
+  })();
+
+  return refreshPromise;
+}
+
+/** Centralize error handling (401 -> refresh -> retry once) */
 api.interceptors.response.use(
   (res) => res,
-  (error: AxiosError) => {
-    // if (error.response?.status === 401) { bearerToken = null; }
+  async (error: AxiosError) => {
+    const status = error.response?.status;
+    const originalConfig: any = error.config;
+
+    // If there's no config (very rare), just reject
+    if (!originalConfig) return Promise.reject(error);
+
+    const url: string = (originalConfig.url ?? "").toString();
+
+    // Avoid loops: don't try to refresh if the request itself is auth endpoints
+    const isAuthEndpoint =
+      url.includes("/login") || url.includes("/refresh") || url.includes("/logout");
+
+    // Only handle 401s for non-auth requests
+    if (status === 401 && !isAuthEndpoint) {
+      // Prevent infinite retries
+      if (originalConfig._retry) {
+        // Already retried once and still 401 -> force logout
+        setToken(null);
+        authFailureHandler?.("unauthorized");
+        return Promise.reject(error);
+      }
+
+      originalConfig._retry = true;
+
+      // Try refreshing using the cookie
+      const newToken = await refreshAccessToken();
+
+      if (newToken) {
+        // Ensure headers exist and set Authorization for retry
+        if (!originalConfig.headers) {
+          originalConfig.headers = new AxiosHeaders();
+        }
+        setHeader(originalConfig.headers as any, "Authorization", `Bearer ${newToken}`);
+
+        // Retry the original request once
+        return api.request(originalConfig);
+      }
+
+      // Refresh failed -> force logout
+      setToken(null);
+      authFailureHandler?.("refresh_failed");
+      return Promise.reject(error);
+    }
+
+    // If /refresh itself fails with 401, force logout (cookie expired/missing)
+    if (status === 401 && isAuthEndpoint && url.includes("/refresh")) {
+      setToken(null);
+      authFailureHandler?.("expired");
+      return Promise.reject(error);
+    }
+
     return Promise.reject(error);
   }
 );
@@ -147,11 +252,7 @@ export async function testSqlConnection(id: number) {
   return data;
 }
 
-export async function runSqlSelect<T = any>(
-  id: number,
-  sql: string,
-  params: any[] = []
-) {
+export async function runSqlSelect<T = any>(id: number, sql: string, params: any[] = []) {
   const { data } = await api.post<{ rows: T[]; count: number }>(
     `/v1/sql-connections/${id}/query`,
     { sql, params }
@@ -178,10 +279,7 @@ export async function getEnvironmentModules(envId: number) {
     : [];
 }
 
-export async function putEnvironmentModules(
-  envId: number,
-  modules: ModuleToggle[]
-) {
+export async function putEnvironmentModules(envId: number, modules: ModuleToggle[]) {
   const { data } = await api.put<{ environmentId?: number; modules?: ModuleToggle[] }>(
     "/environment/modules",
     { modules },
@@ -216,7 +314,6 @@ export type Machine = {
   created_at?: string;
   updated_at?: string;
 
-  // ✅ Optional “last cycle” fields (backend may already provide something like these)
   last_cycle_number?: number | string | null;
   last_program_name?: string | null;
   last_operator?: string | null;
@@ -239,9 +336,7 @@ export type IntegrationProfile = {
 };
 
 export async function getMachineTypes() {
-  const { data } = await api.get<{ items: MachineType[] }>(
-    "/v1/lookups/machine-types"
-  );
+  const { data } = await api.get<{ items: MachineType[] }>("/v1/lookups/machine-types");
   return data.items;
 }
 
@@ -258,10 +353,7 @@ export async function listMachines(params?: {
   integration_key?: string;
   search?: string;
 }) {
-  const { data } = await api.get<{ items: Machine[] }>(
-    "/v1/machines",
-    { params }
-  );
+  const { data } = await api.get<{ items: Machine[] }>("/v1/machines", { params });
   return data.items;
 }
 
@@ -271,18 +363,12 @@ export async function getMachine(id: number) {
 }
 
 export async function createMachine(payload: Partial<Machine>) {
-  const { data } = await api.post<Machine>(
-    "/v1/machines",
-    payload
-  );
+  const { data } = await api.post<Machine>("/v1/machines", payload);
   return data;
 }
 
 export async function updateMachine(id: number, payload: Partial<Machine>) {
-  const { data } = await api.put<Machine>(
-    `/v1/machines/${id}`,
-    payload
-  );
+  const { data } = await api.put<Machine>(`/v1/machines/${id}`, payload);
   return data;
 }
 
@@ -314,11 +400,7 @@ export async function uploadWasherXml(params: {
   if (params.cycleNumber) form.append("cycle_number", params.cycleNumber);
   form.append("file", params.file);
 
-  const { data } = await api.post<WasherXmlUploadResponse>(
-    "/v1/uploads/washer-xml",
-    form
-  );
-
+  const { data } = await api.post<WasherXmlUploadResponse>("/v1/uploads/washer-xml", form);
   return data;
 }
 
@@ -331,9 +413,7 @@ export function getApiErrorMessage(err: unknown): string {
     return status ? `${detail} (HTTP ${status})` : detail;
 
   if (typeof e?.response?.data === "string")
-    return status
-      ? `${e.response.data} (HTTP ${status})`
-      : e.response.data;
+    return status ? `${e.response.data} (HTTP ${status})` : e.response.data;
 
   if (e?.message) return e.message;
   return "Unknown error";
@@ -382,22 +462,13 @@ export type WasherCycle = {
   id: number;
   cycle_number: number | null;
   program_name: string | null;
-
-  // ✅ add this (backend returns it)
   machine_id: number;
-
-  // already in your type, keep it
   machine_name: string;
-
   started_at?: string;
   ended_at?: string | null;
   duration_sec?: number | null;
-
-  // backend returns this too (nice to have)
   original_filename?: string | null;
-
   result: boolean | null;
-
   extra?: {
     stages?: {
       pre_wash?: WasherCycleStage;
@@ -437,9 +508,7 @@ export interface WasherTelemetryResponse {
   points: TelemetrySeries[];
 }
 
-export async function getWasherCycleTelemetry(
-  cycleId: number
-): Promise<WasherTelemetryResponse> {
+export async function getWasherCycleTelemetry(cycleId: number): Promise<WasherTelemetryResponse> {
   const { data } = await api.get<WasherTelemetryResponse>(
     `/v1/washer-cycles/${cycleId}/telemetry`
   );
@@ -456,7 +525,7 @@ export type MaintenanceLog = {
   ended_at?: string | null; // ISO
   notes?: string | null;
   created_at: string; // ISO
-  created_by?: number | null; // backend returns user id (int) or null
+  created_by?: number | null;
 };
 
 export async function listMaintenanceLogs(params?: {
@@ -508,25 +577,15 @@ export async function updateMaintenanceLog(
 // ---------- Audit Logs ----------
 export type AuditLog = {
   id: string | number;
-
-  // who
   user_id?: string | number | null;
   user_email?: string | null;
   user_name?: string | null;
-
-  // what
   action: string;
   entity_type?: string | null;
   entity_id?: string | number | null;
-
-  // where/how
   ip_address?: string | null;
   user_agent?: string | null;
-
-  // when
-  created_at: string; // ISO datetime string
-
-  // optional details blob
+  created_at: string;
   details?: any;
 };
 
@@ -543,8 +602,8 @@ export async function listAuditLogs(params?: {
   action?: string;
   entity_type?: string;
   entity_id?: string | number;
-  from?: string; // yyyy-mm-dd
-  to?: string;   // yyyy-mm-dd
+  from?: string;
+  to?: string;
   page?: number;
   limit?: number;
 }) {

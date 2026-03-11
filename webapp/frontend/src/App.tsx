@@ -8,6 +8,9 @@ import {
 } from "react-router-dom";
 import { AuthProvider, useAuth } from "./features/auth/AuthContext";
 
+// ✅ NEW: inactivity + countdown manager
+import SessionManager from "./features/auth/SessionManager";
+
 import Home from "./pages/home";
 import Layout from "./pages/layout";
 import LoginPage from "./pages/LoginPage";
@@ -105,6 +108,9 @@ export default function App() {
       <BrowserRouter>
         <BodyClassSync />
 
+        {/* ✅ NEW: inactivity countdown + auto logout */}
+        <SessionManager />
+
         <Routes>
           {/* Login */}
           <Route
@@ -180,10 +186,7 @@ export default function App() {
             />
 
             {/* Backwards compatibility */}
-            <Route
-              path="washers"
-              element={<Navigate to="/machines" replace />}
-            />
+            <Route path="washers" element={<Navigate to="/machines" replace />} />
 
             <Route
               path="devices/:deviceId"
