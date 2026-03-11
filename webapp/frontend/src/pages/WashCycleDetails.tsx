@@ -132,7 +132,6 @@ function sensorToYAxis(sensor: string) {
    Plugins
 -------------------------------------------------- */
 
-/** Plot background (theme-aware) */
 const plotBackgroundPlugin = {
   id: "plotBackground",
   beforeDraw: (chart: any) => {
@@ -152,7 +151,6 @@ const plotBackgroundPlugin = {
   },
 };
 
-/** Vertical hover line */
 const hoverLinePlugin = {
   id: "hoverLine",
   afterDraw: (chart: any) => {
@@ -192,12 +190,7 @@ export default function WashCycleDetails() {
   );
   const [loading, setLoading] = useState(true);
 
-  /** ✅ Forces chart remount on theme change */
   const [themeKey, setThemeKey] = useState(0);
-
-  /* --------------------------------------------------
-     Observe theme changes
-  -------------------------------------------------- */
 
   useEffect(() => {
     const observer = new MutationObserver(() => {
@@ -368,9 +361,21 @@ export default function WashCycleDetails() {
 
   return (
     <div className="container py-4">
-      <Link to={backToCyclesHref} className="btn btn-link btn-sm mb-2">
-        ← Back to cycles
-      </Link>
+      <div className="d-flex align-items-center justify-content-between mb-2">
+        <Link to={backToCyclesHref} className="btn btn-link btn-sm">
+          ← Back to cycles
+        </Link>
+
+        {/* ✅ NEW: Export PDF */}
+        <button
+          className="btn btn-outline-secondary btn-sm"
+          onClick={() =>
+            window.open(`/api/v1/cycles/${cycle.id}/export-pdf`, "_blank")
+          }
+        >
+          Export PDF
+        </button>
+      </div>
 
       <div className="card mb-3">
         <div className="card-body">

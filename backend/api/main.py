@@ -28,8 +28,8 @@ from app.api.v1.washer_cycles_routes import router as washer_cycles_router
 # ✅ Maintenance router
 from app.api.v1.maintenance_routes import router as maintenance_router
 
-# (Optional) if you later add the connectors module and want to expose those routes too:
-# from app.api.v1.connectors_routes import router as connectors_router
+# ✅ NEW: Cycles PDF export router
+from app.api.v1.cycles_pdf import router as cycles_pdf_router
 
 
 log = logging.getLogger("bridgepoint")
@@ -143,7 +143,11 @@ app.include_router(modules_router)
 app.include_router(lookup_router)
 app.include_router(machine_router)
 
+# Register Washer Cycles API
 app.include_router(washer_cycles_router)
+
+# ✅ NEW: Register Cycles PDF Export API
+app.include_router(cycles_pdf_router)
 
 # ✅ Register Maintenance API
 app.include_router(maintenance_router)
