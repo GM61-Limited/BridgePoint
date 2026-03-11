@@ -1,22 +1,3 @@
-"""
-process_signals.py
-
-Extracts true process signal time-series data from MMM washer XML files.
-
-Writes to washer_cycle_points using the normalized schema:
-- cycle_id
-- sensor_type_id
-- t_sec (sample index, NOT wall-clock seconds)
-- value
-
-Physical sensor mapping (LOSSLESS):
-- B25-1 -> temperature_1
-- B25-2 -> temperature_2
-- B35*  -> pressure
-- B55*  -> conductivity
-- A0    -> a0
-"""
-
 from __future__ import annotations
 
 import re
@@ -53,23 +34,16 @@ def _normalize_xml_bytes(xml_bytes: bytes) -> bytes:
 
 
 def _map_oem_label_to_sensor_type(label: str) -> Optional[str]:
-    """
-    Map MMM OEM sensor labels to *physical* sensor_types.code values.
-    """
     label = label.strip()
 
     if label == "A0" or label.startswith("A₀"):
         return "a0"
-
     if label.startswith("B25-1") or label == "B251":
         return "temperature_1"
-
     if label.startswith("B25-2") or label == "B252":
         return "temperature_2"
-
     if label.startswith("B35"):
         return "pressure"
-
     if label.startswith("B55"):
         return "conductivity"
 
@@ -83,11 +57,6 @@ def _map_oem_label_to_sensor_type(label: str) -> Optional[str]:
 def parse_process_signals_from_xml(xml_bytes: bytes) -> List[Dict[str, Any]]:
     """
     Parse MMM XML and return index-aligned telemetry rows.
-
-    IMPORTANT:
-    - MMM uses ONE shared Time array (sensorID:0)
-    - All sensor arrays align by index
-    - Arrays may contain None values
     """
 
     try:
@@ -96,7 +65,7 @@ def parse_process_signals_from_xml(xml_bytes: bytes) -> List[Dict[str, Any]]:
         root = ET.fromstring(_normalize_xml_bytes(xml_bytes))
 
     # --------------------------------------------------
-    # STEP 1: Map sensorID index -> OEM label
+    # STEP 1: sensorID index -> OEM label
     # --------------------------------------------------
 
     sensor_map: Dict[int, str] = {}
@@ -106,72 +75,73 @@ def parse_process_signals_from_xml(xml_bytes: bytes) -> List[Dict[str, Any]]:
         if string_elem is None:
             continue
 
-        text = string_elem.text or ""
-        if not text.startswith("sensorID:"):
+        key = string_elem.text or ""
+        if not key.startswith("sensorID:"):
             continue
 
-        idx = _safe_int(text.split("sensorID:")[-1])
-        strings = void.findall("string")
-        label = strings[-1].text if strings else None
+        idx = _safe_int(key.split("sensorID:")[-1])
+        value_strings = void.findall("string")
+        label = value_strings[-1].text if value_strings else None
 
         if idx is not None and label:
             sensor_map[idx] = label.strip()
 
+    if not sensor_map:
+        return []
+
     # --------------------------------------------------
-    # STEP 2: Collect ALL ArrayLists with their raw objects
+    # STEP 2: Extract all java.util.ArrayList blocks
     # --------------------------------------------------
 
-    all_arrays: List[List[Any]] = []
-    array_types: List[str] = []
+    arrays: List[List[Any]] = []
+    array_kinds: List[str] = []
 
     for obj in root.findall(".//object"):
-        class_elem = obj.find("class")
-        if class_elem is None or class_elem.text != "java.util.ArrayList":
+        if obj.attrib.get("class") != "java.util.ArrayList":
             continue
 
         values: List[Any] = []
-        contains_calendar = False
+        is_time_array = False
 
         for void in obj.findall("void"):
-            if void.findtext("method") != "add":
+            if void.attrib.get("method") != "add":
                 continue
 
             value_obj = void.find("object")
             if value_obj is None:
                 continue
 
-            if value_obj.find(".//class") is not None and \
-               value_obj.findtext(".//class") == "java.util.GregorianCalendar":
-                contains_calendar = True
-                long_val = value_obj.find(".//long")
-                values.append(_safe_int(long_val.text) if long_val is not None else None)
+            # Time array (GregorianCalendar)
+            if value_obj.attrib.get("class") == "java.util.GregorianCalendar":
+                is_time_array = True
+                long_elem = value_obj.find(".//long")
+                values.append(_safe_int(long_elem.text) if long_elem is not None else None)
+                continue
 
-            elif (v := value_obj.find("double")) is not None:
-                values.append(_safe_float(v.text))
-            elif (v := value_obj.find("int")) is not None:
-                values.append(_safe_int(v.text))
+            # Numeric wrappers
+            if (d := value_obj.find("double")) is not None:
+                values.append(_safe_float(d.text))
+            elif (i := value_obj.find("int")) is not None:
+                values.append(_safe_int(i.text))
             else:
                 values.append(None)
 
         if values:
-            all_arrays.append(values)
-            array_types.append("time" if contains_calendar else "data")
+            arrays.append(values)
+            array_kinds.append("time" if is_time_array else "data")
 
-    # --------------------------------------------------
-    # STEP 3: Locate the telemetry block
-    # --------------------------------------------------
-
-    try:
-        time_idx = array_types.index("time")
-    except ValueError:
+    if "time" not in array_kinds:
         return []
 
-    time_series = all_arrays[time_idx]
-    sensor_arrays = all_arrays[time_idx + 1 : time_idx + 1 + len(sensor_map) - 1]
+    # --------------------------------------------------
+    # STEP 3: Align time + sensors
+    # --------------------------------------------------
 
-    # --------------------------------------------------
-    # STEP 4: Index-align samples
-    # --------------------------------------------------
+    time_idx = array_kinds.index("time")
+    time_series = arrays[time_idx]
+
+    # Sensors follow the time array in MMM ordering
+    sensor_arrays = arrays[time_idx + 1 : time_idx + 1 + len(sensor_map) - 1]
 
     rows: List[Dict[str, Any]] = []
 
@@ -193,11 +163,11 @@ def parse_process_signals_from_xml(xml_bytes: bytes) -> List[Dict[str, Any]]:
             if value is None:
                 continue
 
-            xml_label = sensor_map.get(offset)
-            if not xml_label:
+            label = sensor_map.get(offset)
+            if not label:
                 continue
 
-            sensor_type = _map_oem_label_to_sensor_type(xml_label)
+            sensor_type = _map_oem_label_to_sensor_type(label)
             if not sensor_type:
                 continue
 
@@ -218,10 +188,6 @@ def insert_process_signals(
     cycle_id: int,
     signals: List[Dict[str, Any]],
 ):
-    """
-    Insert parsed process signals into washer_cycle_points.
-    """
-
     if not signals:
         return
 
