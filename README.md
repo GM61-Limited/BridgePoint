@@ -98,6 +98,19 @@ bridgepoint/
 
 ---
 
+## Live Demo
+
+A hosted instance of BridgePoint is available at **[bridgepoint.gm61.co.uk](https://bridgepoint.gm61.co.uk)**.
+
+You can log in with the following read-only demo credentials:
+
+| Field | Value |
+|---|---|
+| Username | `demo` |
+| Password | `demo` |
+
+---
+
 ## Getting Started (Local Development)
 
 ### Prerequisites
